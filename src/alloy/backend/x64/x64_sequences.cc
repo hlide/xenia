@@ -1998,8 +1998,8 @@ EMITTER(SELECT_I32, MATCH(I<OPCODE_SELECT, I32<>, I8<>, I32<>, I32<>>)) {
     //                        CMOVcc r,r (latency:2  ),
     //                        MOV    r,r (latency:0-1)
     //e.test(i.src1, i.src1);
-    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
-    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
+    //e.mov(i.dest, i.src2); // please eat TEST latency!
+    //e.cmovz(i.dest, i.src3);
   }
 };
 EMITTER(SELECT_I64, MATCH(I<OPCODE_SELECT, I64<>, I8<>, I64<>, I64<>>)) {
@@ -2014,8 +2014,8 @@ EMITTER(SELECT_I64, MATCH(I<OPCODE_SELECT, I64<>, I8<>, I64<>, I64<>>)) {
     //                        CMOVcc r,r (latency:2  ),
     //                        MOV    r,r (latency:0-1)
     //e.test(i.src1, i.src1);
-    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
-    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
+    //e.mov(i.dest, i.src2); // please eat TEST latency!
+    //e.cmovz(i.dest, i.src3);
   }
 };
 EMITTER(SELECT_F32, MATCH(I<OPCODE_SELECT, F32<>, I8<>, F32<>, F32<>>)) {
