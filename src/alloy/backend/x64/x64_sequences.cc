@@ -1959,6 +1959,15 @@ EMITTER(SELECT_I8, MATCH(I<OPCODE_SELECT, I8<>, I8<>, I8<>, I8<>>)) {
     e.test(i.src1, i.src1);
     e.cmovnz(i.dest.reg().cvt32(), i.src2.reg().cvt32());
     e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
+
+    // [Hlide]
+    //    CMOVcc vs. CMP/Jcc: (http://msinilo.pl/blog/?p=1115)
+    //    Haswell:            TEST   r,r (latency:1  ),
+    //                        CMOVcc r,r (latency:2  ),
+    //                        MOV    r,r (latency:0-1)
+    //e.test(i.src1, i.src1);
+    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
+    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
   }
 };
 EMITTER(SELECT_I16, MATCH(I<OPCODE_SELECT, I16<>, I8<>, I16<>, I16<>>)) {
@@ -1966,6 +1975,15 @@ EMITTER(SELECT_I16, MATCH(I<OPCODE_SELECT, I16<>, I8<>, I16<>, I16<>>)) {
     e.test(i.src1, i.src1);
     e.cmovnz(i.dest.reg().cvt32(), i.src2.reg().cvt32());
     e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
+
+    // [Hlide]
+    //    CMOVcc vs. CMP/Jcc: (http://msinilo.pl/blog/?p=1115)
+    //    Haswell:            TEST   r,r (latency:1  ),
+    //                        CMOVcc r,r (latency:2  ),
+    //                        MOV    r,r (latency:0-1)
+    //e.test(i.src1, i.src1);
+    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
+    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32()); 
   }
 };
 EMITTER(SELECT_I32, MATCH(I<OPCODE_SELECT, I32<>, I8<>, I32<>, I32<>>)) {
@@ -1973,6 +1991,15 @@ EMITTER(SELECT_I32, MATCH(I<OPCODE_SELECT, I32<>, I8<>, I32<>, I32<>>)) {
     e.test(i.src1, i.src1);
     e.cmovnz(i.dest, i.src2);
     e.cmovz(i.dest, i.src3);
+
+    // [Hlide]
+    //    CMOVcc vs. CMP/Jcc: (http://msinilo.pl/blog/?p=1115)
+    //    Haswell:            TEST   r,r (latency:1  ),
+    //                        CMOVcc r,r (latency:2  ),
+    //                        MOV    r,r (latency:0-1)
+    //e.test(i.src1, i.src1);
+    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
+    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
   }
 };
 EMITTER(SELECT_I64, MATCH(I<OPCODE_SELECT, I64<>, I8<>, I64<>, I64<>>)) {
@@ -1980,6 +2007,15 @@ EMITTER(SELECT_I64, MATCH(I<OPCODE_SELECT, I64<>, I8<>, I64<>, I64<>>)) {
     e.test(i.src1, i.src1);
     e.cmovnz(i.dest, i.src2);
     e.cmovz(i.dest, i.src3);
+
+    // [Hlide]
+    //    CMOVcc vs. CMP/Jcc: (http://msinilo.pl/blog/?p=1115)
+    //    Haswell:            TEST   r,r (latency:1  ),
+    //                        CMOVcc r,r (latency:2  ),
+    //                        MOV    r,r (latency:0-1)
+    //e.test(i.src1, i.src1);
+    //e.mov(i.dest.reg().cvt32(), i.src2.reg().cvt32()); // please eat TEST latency!
+    //e.cmovz(i.dest.reg().cvt32(), i.src3.reg().cvt32());
   }
 };
 EMITTER(SELECT_F32, MATCH(I<OPCODE_SELECT, F32<>, I8<>, F32<>, F32<>>)) {
@@ -1993,6 +2029,13 @@ EMITTER(SELECT_F32, MATCH(I<OPCODE_SELECT, F32<>, I8<>, F32<>, F32<>>)) {
     e.vpand(e.xmm1, e.xmm0, i.src2);
     e.vpandn(i.dest, e.xmm0, i.src3);
     e.vpor(i.dest, e.xmm1);
+
+    // [hlide] I cannot find shorter sequence
+    //e.movzx(e.eax, i.src1);
+    //e.vxorps(e.xmm0, e.xmm0);
+    //e.vmovd(e.xmm1, e.eax);
+    //e.vcmpneqss(e.xmm0, e.xmm1);
+    //e.vblendvps(i.dest, i.src3, i.src2, e.xmm0);
   }
 };
 EMITTER(SELECT_F64, MATCH(I<OPCODE_SELECT, F64<>, I8<>, F64<>, F64<>>)) {
@@ -2005,6 +2048,13 @@ EMITTER(SELECT_F64, MATCH(I<OPCODE_SELECT, F64<>, I8<>, F64<>, F64<>>)) {
     e.vpand(e.xmm1, e.xmm0, i.src2);
     e.vpandn(i.dest, e.xmm0, i.src3);
     e.vpor(i.dest, e.xmm1);
+
+    // [hlide] I cannot find shorter sequence
+    //e.movzx(e.eax, i.src1);
+    //e.vxorpd(e.xmm0, e.xmm0);
+    //e.vmovd(e.xmm1, e.eax);
+    //e.vcmpneqsd(e.xmm0, e.xmm1);
+    //e.vblendvpd(i.dest, i.src3, i.src2, e.xmm0);
   }
 };
 EMITTER(SELECT_V128, MATCH(I<OPCODE_SELECT, V128<>, I8<>, V128<>, V128<>>)) {
@@ -2019,6 +2069,14 @@ EMITTER(SELECT_V128, MATCH(I<OPCODE_SELECT, V128<>, I8<>, V128<>, V128<>>)) {
     e.vpand(e.xmm1, e.xmm0, i.src2);
     e.vpandn(i.dest, e.xmm0, i.src3);
     e.vpor(i.dest, e.xmm1);
+
+    // [hlide] I cannot find shorter sequence
+    //e.movzx(e.eax, i.src1);
+    //e.vxorps(e.xmm0, e.xmm0);
+    //e.vmovd(e.xmm1, e.eax);
+    //e.vcmpneqss(e.xmm0, e.xmm1);
+    //e.vpbroadcastd(e.xmm0, e.xmm0);
+    //e.vblendvps(i.dest, i.src3, i.src2, e.xmm0);
   }
 };
 EMITTER_OPCODE_TABLE(
