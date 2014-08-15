@@ -10,6 +10,8 @@
 #ifndef XENIA_KERNEL_XBOXKRNL_XTHREAD_H_
 #define XENIA_KERNEL_XBOXKRNL_XTHREAD_H_
 
+#include <atomic>
+
 #include <xenia/kernel/xobject.h>
 
 #include <xenia/xbox.h>
@@ -60,6 +62,7 @@ public:
 
   int32_t QueryPriority();
   void SetPriority(int32_t increment);
+  void SetAffinity(uint32_t affinity);
 
   X_STATUS Resume(uint32_t* out_suspend_count);
   X_STATUS Suspend(uint32_t* out_suspend_count);
@@ -73,6 +76,9 @@ private:
   void PlatformDestroy();
   X_STATUS PlatformExit(int exit_code);
 
+  static void DeliverAPCs(void* data);
+  void RundownAPCs();
+
   struct {
     uint32_t    stack_size;
     uint32_t    xapi_thread_startup;
@@ -83,13 +89,15 @@ private:
 
   uint32_t      thread_id_;
   void*         thread_handle_;
+  uint32_t      scratch_address_;
+  uint32_t      scratch_size_;
   uint32_t      tls_address_;
   uint32_t      thread_state_address_;
   cpu::XenonThreadState* thread_state_;
 
   char*         name_;
 
-  uint32_t      irql_;
+  std::atomic<uint32_t> irql_;
   xe_mutex_t*   apc_lock_;
   NativeList*   apc_list_;
 

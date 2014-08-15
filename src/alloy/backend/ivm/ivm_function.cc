@@ -10,21 +10,24 @@
 #include <alloy/backend/ivm/ivm_function.h>
 
 #include <alloy/backend/ivm/ivm_stack.h>
-#include <alloy/backend/tracing.h>
 #include <alloy/runtime/runtime.h>
 #include <alloy/runtime/thread_state.h>
 
-using namespace alloy;
-using namespace alloy::backend;
-using namespace alloy::backend::ivm;
-using namespace alloy::runtime;
+namespace alloy {
+namespace backend {
+namespace ivm {
 
+using alloy::runtime::Breakpoint;
+using alloy::runtime::FunctionInfo;
+using alloy::runtime::ThreadState;
 
-IVMFunction::IVMFunction(FunctionInfo* symbol_info) :
-    register_count_(0), intcode_count_(0), intcodes_(0),
-    source_map_count_(0), source_map_(0),
-    Function(symbol_info) {
-}
+IVMFunction::IVMFunction(FunctionInfo* symbol_info)
+    : Function(symbol_info),
+      register_count_(0),
+      intcode_count_(0),
+      intcodes_(0),
+      source_map_count_(0),
+      source_map_(0) {}
 
 IVMFunction::~IVMFunction() {
   xe_free(intcodes_);
@@ -57,8 +60,7 @@ int IVMFunction::AddBreakpointImpl(Breakpoint* breakpoint) {
   }
 
   // TEMP breakpoints always overwrite normal ones.
-  if (!i->debug_flags ||
-      breakpoint->type() == Breakpoint::TEMP_TYPE) {
+  if (!i->debug_flags || breakpoint->type() == Breakpoint::TEMP_TYPE) {
     uint64_t breakpoint_ptr = (uint64_t)breakpoint;
     i->src2_reg = (uint32_t)breakpoint_ptr;
     i->src3_reg = (uint32_t)(breakpoint_ptr >> 32);
@@ -118,17 +120,15 @@ int IVMFunction::CallImpl(ThreadState* thread_state, uint64_t return_address) {
   ics.locals = local_stack;
   ics.context = (uint8_t*)thread_state->raw_context();
   ics.membase = memory->membase();
+  ics.page_table = ics.membase + memory->page_table();
   ics.did_carry = 0;
   ics.did_saturate = 0;
-  ics.access_callbacks = thread_state->runtime()->access_callbacks();
   ics.thread_state = thread_state;
   ics.return_address = return_address;
   ics.call_return_address = 0;
 
-  volatile int* suspend_flag_address = thread_state->suspend_flag_address();
-
-  // TODO(benvanik): DID_CARRY -- need HIR to set a OPCODE_FLAG_SET_CARRY
-  //                 or something so the fns can set an ics flag.
+// TODO(benvanik): DID_CARRY -- need HIR to set a OPCODE_FLAG_SET_CARRY
+//                 or something so the fns can set an ics flag.
 
 #ifdef TRACE_SOURCE_OFFSET
   size_t source_index = 0;
@@ -136,12 +136,6 @@ int IVMFunction::CallImpl(ThreadState* thread_state, uint64_t return_address) {
 
   uint32_t ia = 0;
   while (true) {
-    // Check suspend. We could do this only on certain instructions, if we
-    // wanted to speed things up.
-    if (*suspend_flag_address) {
-      thread_state->EnterSuspend();
-    }
-
 #ifdef TRACE_SOURCE_OFFSET
     uint64_t source_offset = -1;
     if (source_index < this->source_map_count_ &&
@@ -177,3 +171,7 @@ int IVMFunction::CallImpl(ThreadState* thread_state, uint64_t return_address) {
 
   return 0;
 }
+
+}  // namespace ivm
+}  // namespace backend
+}  // namespace alloy

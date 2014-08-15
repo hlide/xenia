@@ -16,16 +16,5 @@
 #include <alloy/runtime/module.h>
 #include <alloy/runtime/runtime.h>
 #include <alloy/runtime/thread_state.h>
-#include <alloy/tracing/tracing.h>
-
-
-// TODO(benvanik): based on platform/config/etc.
-#include <alloy/backend/ivm/ivm_backend.h>
-
-
-namespace alloy {
-
-}  // namespace alloy
-
 
 #endif  // ALLOY_ALLOY_H_

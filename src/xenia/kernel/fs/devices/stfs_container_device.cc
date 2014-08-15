@@ -63,7 +63,7 @@ Entry* STFSContainerDevice::ResolvePath(const char* path) {
 
   // Walk the path, one separator at a time.
   // We copy it into the buffer and shift it left over and over.
-  char remaining[XE_MAX_PATH];
+  char remaining[poly::max_path];
   XEIGNORE(xestrcpya(remaining, XECOUNT(remaining), path));
   while (remaining[0]) {
     char* next_slash = xestrchra(remaining, '\\');
@@ -100,11 +100,11 @@ Entry* STFSContainerDevice::ResolvePath(const char* path) {
 
 
 X_STATUS STFSContainerDevice::QueryVolume(XVolumeInfo* out_info, size_t length) {
-  XEASSERTALWAYS();
+  assert_always();
   return X_STATUS_NOT_IMPLEMENTED;
 }
 
 X_STATUS STFSContainerDevice::QueryFileSystemAttributes(XFileSystemAttributeInfo* out_info, size_t length) {
-  XEASSERTALWAYS();
+  assert_always();
   return X_STATUS_NOT_IMPLEMENTED;
 }

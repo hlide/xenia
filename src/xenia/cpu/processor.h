@@ -10,9 +10,7 @@
 #ifndef XENIA_CPU_PROCESSOR_H_
 #define XENIA_CPU_PROCESSOR_H_
 
-#include <alloy/runtime/register_access.h>
 #include <xenia/core.h>
-#include <xenia/debug/debug_target.h>
 
 #include <vector>
 
@@ -28,13 +26,16 @@ XEDECLARECLASS2(xe, cpu, XexModule);
 namespace xe {
 namespace cpu {
 
-using RegisterAccessCallbacks = alloy::runtime::RegisterAccessCallbacks;
-using RegisterHandlesCallback = alloy::runtime::RegisterHandlesCallback;
-using RegisterReadCallback = alloy::runtime::RegisterReadCallback;
-using RegisterWriteCallback = alloy::runtime::RegisterWriteCallback;
+
+enum class Irql : uint32_t {
+  PASSIVE = 0,
+  APC = 1,
+  DISPATCH = 2,
+  DPC = 3,
+};
 
 
-class Processor : public debug::DebugTarget {
+class Processor {
 public:
   Processor(Emulator* emulator);
   ~Processor();
@@ -45,29 +46,17 @@ public:
 
   int Setup();
 
-  void AddRegisterAccessCallbacks(RegisterAccessCallbacks callbacks);
-
   int Execute(
       XenonThreadState* thread_state, uint64_t address);
   uint64_t Execute(
-      XenonThreadState* thread_state, uint64_t address, uint64_t arg0);
-  uint64_t Execute(
-      XenonThreadState* thread_state, uint64_t address, uint64_t arg0,
-      uint64_t arg1);
+      XenonThreadState* thread_state, uint64_t address, uint64_t args[],
+      size_t arg_count);
+
+  Irql RaiseIrql(Irql new_value);
+  void LowerIrql(Irql old_value);
 
   uint64_t ExecuteInterrupt(
-      uint32_t cpu, uint64_t address, uint64_t arg0, uint64_t arg1);
-
-  virtual void OnDebugClientConnected(uint32_t client_id);
-  virtual void OnDebugClientDisconnected(uint32_t client_id);
-  virtual json_t* OnDebugRequest(
-      uint32_t client_id, const char* command, json_t* request,
-      bool& succeeded);
-
-private:
-  json_t* DumpModule(XexModule* module, bool& succeeded);
-  json_t* DumpFunction(uint64_t address, bool& succeeded);
-  json_t* DumpThreadState(XenonThreadState* thread_state);
+      uint32_t cpu, uint64_t address, uint64_t args[], size_t arg_count);
 
 private:
   Emulator*           emulator_;
@@ -76,30 +65,10 @@ private:
   XenonRuntime*       runtime_;
   Memory*             memory_;
 
+  Irql                irql_;
   xe_mutex_t*         interrupt_thread_lock_;
   XenonThreadState*   interrupt_thread_state_;
   uint64_t            interrupt_thread_block_;
-
-  class DebugClientState {
-  public:
-    DebugClientState(XenonRuntime* runtime);
-    ~DebugClientState();
-
-    int AddBreakpoint(const char* breakpoint_id,
-                      alloy::runtime::Breakpoint* breakpoint);
-    int RemoveBreakpoint(const char* breakpoint_id);
-    int RemoveAllBreakpoints();
-
-  private:
-    XenonRuntime* runtime_;
-
-    xe_mutex_t* breakpoints_lock_;
-    typedef std::unordered_map<std::string, alloy::runtime::Breakpoint*> BreakpointMap;
-    BreakpointMap breakpoints_;
-  };
-  xe_mutex_t* debug_client_states_lock_;
-  typedef std::unordered_map<uint32_t, DebugClientState*> DebugClientStateMap;
-  DebugClientStateMap debug_client_states_;
 };
 
 

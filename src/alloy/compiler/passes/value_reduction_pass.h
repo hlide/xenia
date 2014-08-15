@@ -12,27 +12,23 @@
 
 #include <alloy/compiler/compiler_pass.h>
 
-
 namespace alloy {
 namespace compiler {
 namespace passes {
 
-
 class ValueReductionPass : public CompilerPass {
-public:
+ public:
   ValueReductionPass();
-  virtual ~ValueReductionPass();
+  ~ValueReductionPass() override;
 
-  virtual int Run(hir::HIRBuilder* builder);
+  int Run(hir::HIRBuilder* builder) override;
 
-private:
+ private:
   void ComputeLastUse(hir::Value* value);
 };
-
 
 }  // namespace passes
 }  // namespace compiler
 }  // namespace alloy
-
 
 #endif  // ALLOY_COMPILER_PASSES_VALUE_REDUCTION_PASS_H_

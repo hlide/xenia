@@ -1,9 +1,6 @@
 # Copyright 2013 Ben Vanik. All Rights Reserved.
 {
   'sources': [
-    'assert.h',
-    'atomic.h',
-    'byte_order.h',
     'common.h',
     'config.h',
     'core.h',
@@ -17,7 +14,6 @@
     'malloc.h',
     'platform.cc',
     'platform.h',
-    'platform_includes.h',
     'profiling.cc',
     'profiling.h',
     'string.cc',
@@ -31,7 +27,6 @@
     'apu/sources.gypi',
     'core/sources.gypi',
     'cpu/sources.gypi',
-    'debug/sources.gypi',
     'gpu/sources.gypi',
     'hid/sources.gypi',
     'kernel/sources.gypi',

@@ -14,32 +14,27 @@
 
 #include <alloy/backend/backend.h>
 
-
 namespace alloy {
 namespace backend {
 namespace ivm {
 
-
 #define ALLOY_HAS_IVM_BACKEND 1
 
-
 class IVMBackend : public Backend {
-public:
+ public:
   IVMBackend(runtime::Runtime* runtime);
-  virtual ~IVMBackend();
+  ~IVMBackend() override;
 
-  virtual int Initialize();
+  int Initialize() override;
 
-  virtual void* AllocThreadData();
-  virtual void FreeThreadData(void* thread_data);
+  void* AllocThreadData() override;
+  void FreeThreadData(void* thread_data) override;
 
-  virtual Assembler* CreateAssembler();
+  std::unique_ptr<Assembler> CreateAssembler() override;
 };
-
 
 }  // namespace ivm
 }  // namespace backend
 }  // namespace alloy
-
 
 #endif  // ALLOY_BACKEND_IVM_IVM_BACKEND_H_

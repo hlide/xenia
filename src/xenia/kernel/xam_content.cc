@@ -33,17 +33,21 @@ SHIM_CALL XamContentGetLicenseMask_shim(
       mask_ptr,
       overlapped_ptr);
 
-  XEASSERTZERO(overlapped_ptr);
-
   // Arcade games seem to call this and check the result mask for random bits.
   // If we fail, the games seem to use a hardcoded mask, which is likely trial.
   // To be clever, let's just try setting all the bits.
   SHIM_SET_MEM_32(mask_ptr, 0xFFFFFFFF);
 
-  SHIM_SET_RETURN_32(X_ERROR_SUCCESS);
+  if (overlapped_ptr) {
+    state->CompleteOverlappedImmediate(overlapped_ptr, X_ERROR_SUCCESS);
+    SHIM_SET_RETURN_32(X_ERROR_IO_PENDING);
+  } else {
+    SHIM_SET_RETURN_32(X_ERROR_SUCCESS);
+  }
 }
 
 
+// http://gameservice.googlecode.com/svn-history/r14/trunk/ContentManager.cpp
 SHIM_CALL XamContentCreateEnumerator_shim(
     PPCContext* ppc_state, KernelState* state) {
   uint32_t arg0 = SHIM_GET_ARG_32(0);
@@ -52,12 +56,15 @@ SHIM_CALL XamContentCreateEnumerator_shim(
   uint32_t arg3 = SHIM_GET_ARG_32(3);
   uint32_t arg4 = SHIM_GET_ARG_32(4);
   uint32_t arg5 = SHIM_GET_ARG_32(5);
-  uint32_t arg6 = SHIM_GET_ARG_32(6);
+  uint32_t handle_ptr = SHIM_GET_ARG_32(6);
 
   XELOGD(
       "XamContentCreateEnumerator(%.8X, %.8X, %.8X, %.8X, %.8X, %.8X, %.8X)",
-      arg0, arg1, arg2, arg3, arg4, arg5, arg6);
-  SHIM_SET_RETURN_32(X_ERROR_DEVICE_NOT_CONNECTED);
+      arg0, arg1, arg2, arg3, arg4, arg5, handle_ptr);
+
+  SHIM_SET_MEM_32(handle_ptr, X_INVALID_HANDLE_VALUE);
+
+  SHIM_SET_RETURN_32(X_ERROR_NO_MORE_FILES);
 }
 
 

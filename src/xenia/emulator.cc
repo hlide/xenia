@@ -12,7 +12,6 @@
 #include <xenia/apu/apu.h>
 #include <xenia/cpu/cpu.h>
 #include <xenia/cpu/xenon_memory.h>
-#include <xenia/debug/debug_server.h>
 #include <xenia/gpu/gpu.h>
 #include <xenia/hid/hid.h>
 #include <xenia/kernel/kernel.h>
@@ -25,7 +24,6 @@
 using namespace xe;
 using namespace xe::apu;
 using namespace xe::cpu;
-using namespace xe::debug;
 using namespace xe::gpu;
 using namespace xe::hid;
 using namespace xe::kernel;
@@ -36,7 +34,6 @@ using namespace xe::ui;
 Emulator::Emulator(const xechar_t* command_line) :
     main_window_(0),
     memory_(0),
-    debug_server_(0),
     processor_(0),
     audio_system_(0), graphics_system_(0), input_system_(0),
     export_resolver_(0), file_system_(0),
@@ -49,11 +46,6 @@ Emulator::~Emulator() {
 
   if (main_window_) {
     main_window_->Close();
-  }
-
-  // Disconnect all debug clients first.
-  if (debug_server_) {
-    debug_server_->Shutdown();
   }
 
   delete xam_;
@@ -72,8 +64,6 @@ Emulator::~Emulator() {
 
   delete processor_;
 
-  delete debug_server_;
-
   delete export_resolver_;
 }
 
@@ -89,10 +79,6 @@ X_STATUS Emulator::Setup() {
   // Shared export resolver used to attach and query for HLE exports.
   export_resolver_ = new ExportResolver();
   XEEXPECTNOTNULL(export_resolver_);
-
-  // Create the debugger.
-  debug_server_ = new DebugServer(this);
-  XEEXPECTNOTNULL(debug_server_);
 
   // Initialize the CPU.
   processor_ = new Processor(this);
@@ -134,11 +120,6 @@ X_STATUS Emulator::Setup() {
   xam_ = new XamModule(this, kernel_state_);
   XEEXPECTNOTNULL(xam_);
 
-  // Prepare the debugger.
-  // This may pause waiting for connections.
-  result = debug_server_->Startup();
-  XEEXPECTZERO(result);
-
   return result;
 
 XECLEANUP:
@@ -146,7 +127,7 @@ XECLEANUP:
 }
 
 void Emulator::set_main_window(Window* window) {
-  XEASSERTNULL(main_window_);
+  assert_null(main_window_);
   main_window_ = window;
 
   window->closed.AddListener([](UIEvent& e) {
@@ -166,7 +147,7 @@ X_STATUS Emulator::LaunchXexFile(const xechar_t* path) {
   int result_code = 0;
 
   // Get just the filename (foo.xex).
-  const xechar_t* file_name = xestrrchr(path, XE_PATH_SEPARATOR);
+  const xechar_t* file_name = xestrrchr(path, poly::path_separator);
   if (file_name) {
     // Skip slash.
     file_name++;
@@ -176,7 +157,7 @@ X_STATUS Emulator::LaunchXexFile(const xechar_t* path) {
   }
 
   // Get the parent path of the file.
-  xechar_t parent_path[XE_MAX_PATH];
+  xechar_t parent_path[poly::max_path];
   XEIGNORE(xestrcpy(parent_path, XECOUNT(parent_path), path));
   parent_path[file_name - path] = 0;
 
@@ -195,7 +176,7 @@ X_STATUS Emulator::LaunchXexFile(const xechar_t* path) {
       "d:", "\\Device\\Harddisk1\\Partition0");
 
   // Get the file name of the module to load from the filesystem.
-  char fs_path[XE_MAX_PATH];
+  char fs_path[poly::max_path];
   XEIGNORE(xestrcpya(fs_path, XECOUNT(fs_path), "game:\\"));
   char* fs_path_ptr = fs_path + xestrlena(fs_path);
   *fs_path_ptr = 0;

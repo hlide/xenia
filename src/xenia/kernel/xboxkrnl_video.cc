@@ -12,6 +12,7 @@
 #include <xenia/emulator.h>
 #include <xenia/cpu/cpu.h>
 #include <xenia/gpu/gpu.h>
+#include <xenia/gpu/xenos/packets.h>
 #include <xenia/kernel/kernel_state.h>
 #include <xenia/kernel/xboxkrnl_private.h>
 #include <xenia/kernel/xboxkrnl_rtl.h>
@@ -76,17 +77,34 @@ SHIM_CALL VdGetCurrentDisplayInformation_shim(
       ptr);
 
   // Expecting a length 0x58 struct of stuff.
-  SHIM_SET_MEM_32(ptr + 0x10, 1280);
-  SHIM_SET_MEM_32(ptr + 0x14, 720);
-  SHIM_SET_MEM_16(ptr + 0x48, 1280);
-  SHIM_SET_MEM_16(ptr + 0x4A, 720);
-  SHIM_SET_MEM_16(ptr + 0x56, 1280);
+  SHIM_SET_MEM_32(ptr + 0, (1280 << 16) | 720);
+  SHIM_SET_MEM_32(ptr + 4, 0);
+  SHIM_SET_MEM_32(ptr + 8, 0);
+  SHIM_SET_MEM_32(ptr + 12, 0);
+  SHIM_SET_MEM_32(ptr + 16, 1280);  // backbuffer width?
+  SHIM_SET_MEM_32(ptr + 20, 720);  // backbuffer height?
+  SHIM_SET_MEM_32(ptr + 24, 1280);
+  SHIM_SET_MEM_32(ptr + 28, 720);
+  SHIM_SET_MEM_32(ptr + 32, 1);
+  SHIM_SET_MEM_32(ptr + 36, 0);
+  SHIM_SET_MEM_32(ptr + 40, 0);
+  SHIM_SET_MEM_32(ptr + 44, 0);
+  SHIM_SET_MEM_32(ptr + 48, 1);
+  SHIM_SET_MEM_32(ptr + 52, 0);
+  SHIM_SET_MEM_32(ptr + 56, 0);
+  SHIM_SET_MEM_32(ptr + 60, 0);
+  SHIM_SET_MEM_32(ptr + 64, 0x014000B4);  // ?
+  SHIM_SET_MEM_32(ptr + 68, 0x014000B4);  // ?
+  SHIM_SET_MEM_32(ptr + 72, (1280 << 16) | 720);  // actual display size?
+  SHIM_SET_MEM_32(ptr + 76, 0x42700000);
+  SHIM_SET_MEM_32(ptr + 80, 0);
+  SHIM_SET_MEM_32(ptr + 84, 1280);  // display width
 }
 
 
 uint32_t xeVdQueryVideoFlags() {
   // ?
-  return 0x00000007;
+  return 0x00000006;
 }
 
 
@@ -116,15 +134,15 @@ void xeVdQueryVideoMode(X_VIDEO_MODE *video_mode, bool swap) {
   video_mode->unknown_0x01    = 0x01;
 
   if (swap) {
-    video_mode->display_width   = XESWAP32BE(video_mode->display_width);
-    video_mode->display_height  = XESWAP32BE(video_mode->display_height);
-    video_mode->is_interlaced   = XESWAP32BE(video_mode->is_interlaced);
-    video_mode->is_widescreen   = XESWAP32BE(video_mode->is_widescreen);
-    video_mode->is_hi_def       = XESWAP32BE(video_mode->is_hi_def);
-    video_mode->refresh_rate    = XESWAPF32BE(video_mode->refresh_rate);
-    video_mode->video_standard  = XESWAP32BE(video_mode->video_standard);
-    video_mode->unknown_0x8a    = XESWAP32BE(video_mode->unknown_0x8a);
-    video_mode->unknown_0x01    = XESWAP32BE(video_mode->unknown_0x01);
+    video_mode->display_width   = poly::byte_swap(video_mode->display_width);
+    video_mode->display_height  = poly::byte_swap(video_mode->display_height);
+    video_mode->is_interlaced   = poly::byte_swap(video_mode->is_interlaced);
+    video_mode->is_widescreen   = poly::byte_swap(video_mode->is_widescreen);
+    video_mode->is_hi_def       = poly::byte_swap(video_mode->is_hi_def);
+    video_mode->refresh_rate    = poly::byte_swap(video_mode->refresh_rate);
+    video_mode->video_standard  = poly::byte_swap(video_mode->video_standard);
+    video_mode->unknown_0x8a    = poly::byte_swap(video_mode->unknown_0x8a);
+    video_mode->unknown_0x01    = poly::byte_swap(video_mode->unknown_0x01);
   }
 }
 
@@ -145,7 +163,7 @@ SHIM_CALL VdQueryVideoMode_shim(
 void xeVdInitializeEngines(uint32_t unk0, uint32_t callback, uint32_t unk1,
                            uint32_t unk2_ptr, uint32_t unk3_ptr) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
   GraphicsSystem* gs = state->emulator()->graphics_system();
   if (!gs) {
     return;
@@ -187,7 +205,7 @@ SHIM_CALL VdShutdownEngines_shim(
 
 void xeVdSetGraphicsInterruptCallback(uint32_t callback, uint32_t user_data) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
   GraphicsSystem* gs = state->emulator()->graphics_system();
   if (!gs) {
     return;
@@ -216,7 +234,7 @@ SHIM_CALL VdSetGraphicsInterruptCallback_shim(
 
 void xeVdInitializeRingBuffer(uint32_t ptr, uint32_t page_count) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
   GraphicsSystem* gs = state->emulator()->graphics_system();
   if (!gs) {
     return;
@@ -248,7 +266,7 @@ SHIM_CALL VdInitializeRingBuffer_shim(
 
 void xeVdEnableRingBufferRPtrWriteBack(uint32_t ptr, uint32_t block_size) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
   GraphicsSystem* gs = state->emulator()->graphics_system();
   if (!gs) {
     return;
@@ -316,7 +334,7 @@ SHIM_CALL VdGetSystemCommandBuffer_shim(
 
 void xeVdSetSystemCommandBufferGpuIdentifierAddress(uint32_t unk) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
   GraphicsSystem* gs = state->emulator()->graphics_system();
   if (!gs) {
     return;
@@ -422,19 +440,16 @@ SHIM_CALL VdSwap_shim(
       unk6,
       unk7);
 
-  KernelState* kernel_state = shared_kernel_state_;
-  XEASSERTNOTNULL(kernel_state);
-  GraphicsSystem* gs = kernel_state->emulator()->graphics_system();
-  if (!gs) {
-    return;
-  }
-
-  gs->set_swap_pending(true);
-
   // The caller seems to reserve 64 words (256b) in the primary ringbuffer
-  // for this method to do what it needs. We just zero them out. We could
-  // encode the parameters in the stream for the ringbuffer, if needed.
+  // for this method to do what it needs. We just zero them out and send a
+  // token value. It'd be nice to figure out what this is really doing so
+  // that we could simulate it, though due to TCR I bet all games need to
+  // use this method.
   xe_zero_struct(SHIM_MEM_ADDR(unk0), 64 * 4);
+  auto dwords = reinterpret_cast<uint32_t*>(SHIM_MEM_ADDR(unk0));
+  dwords[0] = poly::byte_swap((0x03 << 30) |
+                              ((1 - 1) << 16) |
+                              (xenos::PM4_XE_SWAP << 8));
 
   SHIM_SET_RETURN_64(0);
 }
@@ -474,7 +489,7 @@ void xe::kernel::xboxkrnl::RegisterVideoExports(
   export_resolver->SetVariableMapping(
       "xboxkrnl.exe", ordinals::VdGlobalDevice,
       pVdGlobalDevice);
-  XESETUINT32BE(mem + pVdGlobalDevice, 0);
+  poly::store_and_swap<uint32_t>(mem + pVdGlobalDevice, 0);
 
   // VdGlobalXamDevice (4b)
   // Pointer to the XAM D3D device, which we don't have.
@@ -482,7 +497,7 @@ void xe::kernel::xboxkrnl::RegisterVideoExports(
   export_resolver->SetVariableMapping(
       "xboxkrnl.exe", ordinals::VdGlobalXamDevice,
       pVdGlobalXamDevice);
-  XESETUINT32BE(mem + pVdGlobalXamDevice, 0);
+  poly::store_and_swap<uint32_t>(mem + pVdGlobalXamDevice, 0);
 
   // VdGpuClockInMHz (4b)
   // GPU clock. Xenos is 500MHz. Hope nothing is relying on this timing...
@@ -490,7 +505,7 @@ void xe::kernel::xboxkrnl::RegisterVideoExports(
   export_resolver->SetVariableMapping(
       "xboxkrnl.exe", ordinals::VdGpuClockInMHz,
       pVdGpuClockInMHz);
-  XESETUINT32BE(mem + pVdGpuClockInMHz, 500);
+  poly::store_and_swap<uint32_t>(mem + pVdGpuClockInMHz, 500);
 
   // VdHSIOCalibrationLock (28b)
   // CriticalSection.

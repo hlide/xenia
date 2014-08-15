@@ -9,7 +9,6 @@
 
 #include <xenia/cpu/xex_module.h>
 
-#include <alloy/runtime/tracing.h>
 #include <xenia/cpu/cpu-private.h>
 #include <xenia/cpu/xenon_runtime.h>
 #include <xenia/export_resolver.h>
@@ -29,18 +28,16 @@ void UndefinedImport(PPCContext* ppc_state, void* arg0, void* arg1) {
 XexModule::XexModule(
     XenonRuntime* runtime) :
     runtime_(runtime),
-    name_(0), path_(0), xex_(0),
+    xex_(0),
     base_address_(0), low_address_(0), high_address_(0),
     Module(runtime) {
 }
 
 XexModule::~XexModule() {
   xe_xex2_release(xex_);
-  xe_free(name_);
-  xe_free(path_);
 }
 
-int XexModule::Load(const char* name, const char* path, xe_xex2_ref xex) {
+int XexModule::Load(const std::string& name, const std::string& path, xe_xex2_ref xex) {
   int result;
 
   xex_ = xe_xex2_retain(xex);
@@ -79,8 +76,8 @@ int XexModule::Load(const char* name, const char* path, xe_xex2_ref xex) {
   }
 
   // Setup debug info.
-  name_ = xestrdupa(name);
-  path_ = xestrdupa(path);
+  name_ = std::string(name);
+  path_ = std::string(path);
   // TODO(benvanik): debug info
 
   // Load a specified module map and diff.
@@ -135,20 +132,20 @@ int XexModule::SetupLibraryImports(const xe_xex2_import_library_t* library) {
       if (kernel_export->type == KernelExport::Function) {
         // Not exactly sure what this should be...
         if (info->thunk_address) {
-          *slot = XESWAP32BE(info->thunk_address);
+          *slot = poly::byte_swap(info->thunk_address);
         } else {
           // TODO(benvanik): find out what import variables are.
           XELOGW("kernel import variable not defined %.8X %s",
                  info->value_address, kernel_export->name);
-          *slot = XESWAP32BE(0xF00DF00D);
+          *slot = poly::byte_swap(0xF00DF00D);
         }
       } else {
         if (kernel_export->is_implemented) {
           // Implemented - replace with pointer.
-          XESETUINT32BE(slot, kernel_export->variable_ptr);
+          poly::store_and_swap<uint32_t>(slot, kernel_export->variable_ptr);
         } else {
           // Not implemented - write with a dummy value.
-          XESETUINT32BE(slot, 0xD000BEEF | (kernel_export->ordinal & 0xFFF) << 16);
+          poly::store_and_swap<uint32_t>(slot, 0xD000BEEF | (kernel_export->ordinal & 0xFFF) << 16);
           XELOGCPU("WARNING: imported a variable with no value: %s",
                    kernel_export->name);
         }
@@ -178,10 +175,10 @@ int XexModule::SetupLibraryImports(const xe_xex2_import_library_t* library) {
       //     nop
       //     nop
       uint8_t* p = memory()->Translate(info->thunk_address);
-      XESETUINT32BE(p + 0x0, 0x44000002);
-      XESETUINT32BE(p + 0x4, 0x4E800020);
-      XESETUINT32BE(p + 0x8, 0x60000000);
-      XESETUINT32BE(p + 0xC, 0x60000000);
+      poly::store_and_swap<uint32_t>(p + 0x0, 0x44000002);
+      poly::store_and_swap<uint32_t>(p + 0x4, 0x4E800020);
+      poly::store_and_swap<uint32_t>(p + 0x8, 0x60000000);
+      poly::store_and_swap<uint32_t>(p + 0xC, 0x60000000);
 
       FunctionInfo::ExternHandler handler = 0;
       void* handler_data = 0;

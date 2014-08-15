@@ -9,6 +9,7 @@
 
 #include <xenia/kernel/xboxkrnl_threading.h>
 
+#include <xenia/cpu/processor.h>
 #include <xenia/kernel/dispatcher.h>
 #include <xenia/kernel/kernel_state.h>
 #include <xenia/kernel/native_list.h>
@@ -69,7 +70,7 @@ X_STATUS xeExCreateThread(
     uint32_t xapi_thread_startup,
     uint32_t start_address, uint32_t start_context, uint32_t creation_flags) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   // DWORD
   // LPHANDLE Handle,
@@ -158,7 +159,7 @@ SHIM_CALL ExTerminateThread_shim(
 
 X_STATUS xeNtResumeThread(uint32_t handle, uint32_t* out_suspend_count) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -198,7 +199,7 @@ SHIM_CALL NtResumeThread_shim(
 
 X_STATUS xeKeResumeThread(void* thread_ptr, uint32_t* out_suspend_count) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -236,7 +237,7 @@ SHIM_CALL KeResumeThread_shim(
 
 X_STATUS xeNtSuspendThread(uint32_t handle, uint32_t* out_suspend_count) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -276,12 +277,11 @@ SHIM_CALL NtSuspendThread_shim(
 
 uint32_t xeKeSetAffinityThread(void* thread_ptr, uint32_t affinity) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XThread* thread = (XThread*)XObject::GetObject(state, thread_ptr);
   if (thread) {
-    // TODO(benvanik): implement.
-    XELOGW("KeSetAffinityThread not implemented");
+    thread->SetAffinity(affinity);
   }
 
   return affinity;
@@ -326,7 +326,7 @@ SHIM_CALL KeQueryBasePriorityThread_shim(
 
 uint32_t xeKeSetBasePriorityThread(void* thread_ptr, int32_t increment) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   int32_t prev_priority = 0;
 
@@ -358,7 +358,7 @@ SHIM_CALL KeSetBasePriorityThread_shim(
 
 uint32_t xeKeGetCurrentProcessType() {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   // DWORD
 
@@ -368,8 +368,8 @@ uint32_t xeKeGetCurrentProcessType() {
 
 SHIM_CALL KeGetCurrentProcessType_shim(
     PPCContext* ppc_state, KernelState* state) {
-  XELOGD(
-      "KeGetCurrentProcessType()");
+  // XELOGD(
+  //     "KeGetCurrentProcessType()");
 
   int result = xeKeGetCurrentProcessType();
   SHIM_SET_RETURN_64(result);
@@ -388,8 +388,8 @@ uint64_t xeKeQueryPerformanceFrequency() {
 
 SHIM_CALL KeQueryPerformanceFrequency_shim(
     PPCContext* ppc_state, KernelState* state) {
-  XELOGD(
-      "KeQueryPerformanceFrequency()");
+  // XELOGD(
+  //     "KeQueryPerformanceFrequency()");
 
   uint64_t result = xeKeQueryPerformanceFrequency();
   SHIM_SET_RETURN_64(result);
@@ -410,9 +410,9 @@ SHIM_CALL KeDelayExecutionThread_shim(
   uint32_t interval_ptr = SHIM_GET_ARG_32(2);
   uint64_t interval = SHIM_MEM_64(interval_ptr);
 
-  XELOGD(
-    "KeDelayExecutionThread(%.8X, %d, %.8X(%.16llX)",
-    processor_mode, alertable, interval_ptr, interval);
+  // XELOGD(
+  //     "KeDelayExecutionThread(%.8X, %d, %.8X(%.16llX)",
+  //     processor_mode, alertable, interval_ptr, interval);
 
   X_STATUS result = xeKeDelayExecutionThread(
       processor_mode, alertable, interval);
@@ -550,9 +550,10 @@ SHIM_CALL KeTlsGetValue_shim(
     PPCContext* ppc_state, KernelState* state) {
   uint32_t tls_index = SHIM_GET_ARG_32(0);
 
-  XELOGD(
-      "KeTlsGetValue(%.8X)",
-      tls_index);
+  // Logging disabled, as some games spam this.
+  //XELOGD(
+  //    "KeTlsGetValue(%.8X)",
+  //    tls_index);
 
   uint64_t result = xeKeTlsGetValue(tls_index);
   SHIM_SET_RETURN_64(result);
@@ -594,7 +595,7 @@ SHIM_CALL KeTlsSetValue_shim(
 X_STATUS xeNtCreateEvent(uint32_t* handle_ptr, void* obj_attributes,
                          uint32_t event_type, uint32_t initial_state) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XEvent* ev = new XEvent(state);
   ev->Initialize(!event_type, !!initial_state);
@@ -637,10 +638,10 @@ SHIM_CALL NtCreateEvent_shim(
 
 int32_t xeKeSetEvent(void* event_ptr, uint32_t increment, uint32_t wait) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XEvent* ev = (XEvent*)XObject::GetObject(state, event_ptr);
-  XEASSERTNOTNULL(ev);
+  assert_not_null(ev);
   if (!ev) {
     return 0;
   }
@@ -707,7 +708,7 @@ SHIM_CALL KePulseEvent_shim(
 
   void* event_ptr = SHIM_MEM_ADDR(event_ref);
   XEvent* ev = (XEvent*)XObject::GetObject(state, event_ptr);
-  XEASSERTNOTNULL(ev);
+  assert_not_null(ev);
   if (ev) {
     result = ev->Pulse(increment, !!wait);
   }
@@ -745,10 +746,10 @@ SHIM_CALL NtPulseEvent_shim(
 
 int32_t xeKeResetEvent(void* event_ptr) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XEvent* ev = (XEvent*)XEvent::GetObject(state, event_ptr);
-  XEASSERTNOTNULL(ev);
+  assert_not_null(ev);
   if (!ev) {
     return 0;
   }
@@ -824,11 +825,11 @@ SHIM_CALL NtCreateSemaphore_shim(
 void xeKeInitializeSemaphore(
     void* semaphore_ptr, int32_t count, int32_t limit) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XSemaphore* sem = (XSemaphore*)XSemaphore::GetObject(
       state, semaphore_ptr, 5 /* SemaphoreObject */);
-  XEASSERTNOTNULL(sem);
+  assert_not_null(sem);
   if (!sem) {
     return;
   }
@@ -855,10 +856,10 @@ SHIM_CALL KeInitializeSemaphore_shim(
 int32_t xeKeReleaseSemaphore(
     void* semaphore_ptr, int32_t increment, int32_t adjustment, bool wait) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XSemaphore* sem = (XSemaphore*)XSemaphore::GetObject(state, semaphore_ptr);
-  XEASSERTNOTNULL(sem);
+  assert_not_null(sem);
   if (!sem) {
     return 0;
   }
@@ -953,7 +954,7 @@ SHIM_CALL NtReleaseMutant_shim(
   // Whatever arg 1 is all games seem to set it to 0, so whether it's
   // abandon or wait we just say false. Which is good, cause they are
   // both ignored.
-  XEASSERTZERO(unknown);
+  assert_zero(unknown);
   uint32_t priority_increment = 0;
   bool abandon = false;
   bool wait = false;
@@ -1015,8 +1016,8 @@ SHIM_CALL NtSetTimerEx_shim(
   uint32_t period_ms = SHIM_GET_ARG_32(6);
   uint32_t unk_zero = SHIM_GET_ARG_32(7);
 
-  XEASSERT(unk_one == 1);
-  XEASSERT(unk_zero == 0);
+  assert_true(unk_one == 1);
+  assert_true(unk_zero == 0);
 
   uint64_t due_time = SHIM_MEM_64(due_time_ptr);
 
@@ -1074,7 +1075,7 @@ X_STATUS xeKeWaitForSingleObject(
     void* object_ptr, uint32_t wait_reason, uint32_t processor_mode,
     uint32_t alertable, uint64_t* opt_timeout) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   XObject* object = XObject::GetObject(state, object_ptr);
   if (!object) {
@@ -1128,7 +1129,7 @@ SHIM_CALL NtWaitForSingleObjectEx_shim(
     uint64_t timeout = timeout_ptr ? SHIM_MEM_64(timeout_ptr) : 0;
     result = object->Wait(
         3, wait_mode, alertable,
-    timeout_ptr ? &timeout : NULL);
+        timeout_ptr ? &timeout : NULL);
     object->Release();
   }
 
@@ -1152,7 +1153,7 @@ SHIM_CALL KeWaitForMultipleObjects_shim(
       count, objects_ptr, wait_type, wait_reason, processor_mode,
       alertable, timeout_ptr, wait_block_array_ptr);
 
-  XEASSERT(wait_type >= 0 && wait_type <= 1);
+  assert_true(wait_type >= 0 && wait_type <= 1);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -1191,7 +1192,7 @@ SHIM_CALL NtWaitForMultipleObjectsEx_shim(
       count, handles_ptr, wait_type, wait_mode,
       alertable, timeout_ptr);
 
-  XEASSERT(wait_type >= 0 && wait_type <= 1);
+  assert_true(wait_type >= 0 && wait_type <= 1);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -1257,9 +1258,9 @@ SHIM_CALL NtSignalAndWaitForSingleObjectEx_shim(
 }
 
 
-uint32_t xeKfAcquireSpinLock(void* lock_ptr) {
+uint32_t xeKfAcquireSpinLock(uint32_t* lock_ptr) {
   // Lock.
-  while (!xe_atomic_cas_32(0, 1, lock_ptr)) {
+  while (!poly::atomic_cas(0, 1, lock_ptr)) {
     // Spin!
     // TODO(benvanik): error on deadlock?
   }
@@ -1274,23 +1275,24 @@ SHIM_CALL KfAcquireSpinLock_shim(
     PPCContext* ppc_state, KernelState* state) {
   uint32_t lock_ptr = SHIM_GET_ARG_32(0);
 
-  XELOGD(
-      "KfAcquireSpinLock(%.8X)",
-      lock_ptr);
+  // XELOGD(
+  //     "KfAcquireSpinLock(%.8X)",
+  //     lock_ptr);
 
-  uint32_t old_irql = xeKfAcquireSpinLock(SHIM_MEM_ADDR(lock_ptr));
+  auto lock = reinterpret_cast<uint32_t*>(SHIM_MEM_ADDR(lock_ptr));
+  uint32_t old_irql = xeKfAcquireSpinLock(lock);
 
   SHIM_SET_RETURN_64(old_irql);
 }
 
 
-void xeKfReleaseSpinLock(void* lock_ptr, uint32_t old_irql) {
+void xeKfReleaseSpinLock(uint32_t* lock_ptr, uint32_t old_irql) {
   // Restore IRQL.
   XThread* thread = XThread::GetCurrentThread();
   thread->LowerIrql(old_irql);
 
   // Unlock.
-  xe_atomic_dec_32(lock_ptr);
+  poly::atomic_dec(lock_ptr);
 }
 
 
@@ -1299,12 +1301,13 @@ SHIM_CALL KfReleaseSpinLock_shim(
   uint32_t lock_ptr = SHIM_GET_ARG_32(0);
   uint32_t old_irql = SHIM_GET_ARG_32(1);
 
-  XELOGD(
-      "KfReleaseSpinLock(%.8X, %d)",
-      lock_ptr,
-      old_irql);
+  // XELOGD(
+  //     "KfReleaseSpinLock(%.8X, %d)",
+  //     lock_ptr,
+  //     old_irql);
 
-  xeKfReleaseSpinLock(SHIM_MEM_ADDR(lock_ptr), old_irql);
+  xeKfReleaseSpinLock(reinterpret_cast<uint32_t*>(SHIM_MEM_ADDR(lock_ptr)),
+                      old_irql);
 }
 
 
@@ -1312,13 +1315,13 @@ SHIM_CALL KeAcquireSpinLockAtRaisedIrql_shim(
     PPCContext* ppc_state, KernelState* state) {
   uint32_t lock_ptr = SHIM_GET_ARG_32(0);
 
-  XELOGD(
-      "KeAcquireSpinLockAtRaisedIrql(%.8X)",
-      lock_ptr);
+  // XELOGD(
+  //     "KeAcquireSpinLockAtRaisedIrql(%.8X)",
+  //     lock_ptr);
 
   // Lock.
-  void* lock = SHIM_MEM_ADDR(lock_ptr);
-  while (!xe_atomic_cas_32(0, 1, lock)) {
+  auto lock = reinterpret_cast<uint32_t*>(SHIM_MEM_ADDR(lock_ptr));
+  while (!poly::atomic_cas(0, 1, lock)) {
     // Spin!
     // TODO(benvanik): error on deadlock?
   }
@@ -1329,13 +1332,13 @@ SHIM_CALL KeReleaseSpinLockFromRaisedIrql_shim(
     PPCContext* ppc_state, KernelState* state) {
   uint32_t lock_ptr = SHIM_GET_ARG_32(0);
 
-  XELOGD(
-      "KeReleaseSpinLockFromRaisedIrql(%.8X)",
-      lock_ptr);
+  // XELOGD(
+  //     "KeReleaseSpinLockFromRaisedIrql(%.8X)",
+  //     lock_ptr);
 
   // Unlock.
-  void* lock = SHIM_MEM_ADDR(lock_ptr);
-  xe_atomic_dec_32(lock);
+  auto lock = reinterpret_cast<uint32_t*>(SHIM_MEM_ADDR(lock_ptr));
+  poly::atomic_dec(lock);
 }
 
 
@@ -1346,8 +1349,8 @@ void xeKeEnterCriticalRegion() {
 
 SHIM_CALL KeEnterCriticalRegion_shim(
     PPCContext* ppc_state, KernelState* state) {
-  XELOGD(
-      "KeEnterCriticalRegion()");
+  // XELOGD(
+  //     "KeEnterCriticalRegion()");
   xeKeEnterCriticalRegion();
 }
 
@@ -1359,9 +1362,28 @@ void xeKeLeaveCriticalRegion() {
 
 SHIM_CALL KeLeaveCriticalRegion_shim(
     PPCContext* ppc_state, KernelState* state) {
-  XELOGD(
-      "KeLeaveCriticalRegion()");
+  // XELOGD(
+  //     "KeLeaveCriticalRegion()");
   xeKeLeaveCriticalRegion();
+}
+
+
+SHIM_CALL KeRaiseIrqlToDpcLevel_shim(
+    PPCContext* ppc_state, KernelState* state) {
+  // XELOGD(
+  //     "KeRaiseIrqlToDpcLevel()");
+  auto old_value = state->processor()->RaiseIrql(cpu::Irql::DPC);
+  SHIM_SET_RETURN_32(old_value);
+}
+
+
+SHIM_CALL KfLowerIrql_shim(
+    PPCContext* ppc_state, KernelState* state) {
+  uint32_t old_value = SHIM_GET_ARG_32(0);
+  // XELOGD(
+  //     "KfLowerIrql(%d)",
+  //     old_value);
+  state->processor()->LowerIrql(static_cast<cpu::Irql>(old_value));
 }
 
 
@@ -1669,6 +1691,9 @@ void xe::kernel::xboxkrnl::RegisterThreadingExports(
 
   SHIM_SET_MAPPING("xboxkrnl.exe", KeEnterCriticalRegion, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", KeLeaveCriticalRegion, state);
+
+  SHIM_SET_MAPPING("xboxkrnl.exe", KeRaiseIrqlToDpcLevel, state);
+  SHIM_SET_MAPPING("xboxkrnl.exe", KfLowerIrql, state);
 
   //SHIM_SET_MAPPING("xboxkrnl.exe", NtQueueApcThread, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", KeInitializeApc, state);

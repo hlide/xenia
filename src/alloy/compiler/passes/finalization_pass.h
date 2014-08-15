@@ -12,26 +12,22 @@
 
 #include <alloy/compiler/compiler_pass.h>
 
-
 namespace alloy {
 namespace compiler {
 namespace passes {
 
-
 class FinalizationPass : public CompilerPass {
-public:
+ public:
   FinalizationPass();
-  virtual ~FinalizationPass();
+  ~FinalizationPass() override;
 
-  virtual int Run(hir::HIRBuilder* builder);
+  int Run(hir::HIRBuilder* builder) override;
 
-private:
+ private:
 };
-
 
 }  // namespace passes
 }  // namespace compiler
 }  // namespace alloy
-
 
 #endif  // ALLOY_COMPILER_PASSES_FINALIZATION_PASS_H_

@@ -54,7 +54,7 @@ HostPathEntry::~HostPathEntry() {
 #define COMBINE_TIME(t) (((uint64_t)t.dwHighDateTime << 32) | t.dwLowDateTime)
 
 X_STATUS HostPathEntry::QueryInfo(XFileInfo* out_info) {
-  XEASSERTNOTNULL(out_info);
+  assert_not_null(out_info);
 
   WIN32_FILE_ATTRIBUTE_DATA data;
   if (!GetFileAttributesEx(
@@ -75,7 +75,7 @@ X_STATUS HostPathEntry::QueryInfo(XFileInfo* out_info) {
 
 X_STATUS HostPathEntry::QueryDirectory(
     XDirectoryInfo* out_info, size_t length, const char* file_name, bool restart) {
-  XEASSERTNOTNULL(out_info);
+  assert_not_null(out_info);
 
   WIN32_FIND_DATA ffd;
 
@@ -87,10 +87,10 @@ X_STATUS HostPathEntry::QueryDirectory(
   }
 
   if (handle == INVALID_HANDLE_VALUE) {
-    xechar_t target_path[XE_MAX_PATH];
-    xestrcpy(target_path, XE_MAX_PATH, local_path_);
+    xechar_t target_path[poly::max_path];
+    xestrcpy(target_path, poly::max_path, local_path_);
     if (file_name == NULL) {
-      xestrcat(target_path, XE_MAX_PATH, XETEXT("*"));
+      xestrcat(target_path, poly::max_path, L"*");
     }
     else {
       auto target_length = xestrlen(local_path_);

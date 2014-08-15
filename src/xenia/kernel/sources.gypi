@@ -1,6 +1,8 @@
 # Copyright 2013 Ben Vanik. All Rights Reserved.
 {
   'sources': [
+    'app.cc',
+    'app.h',
     'async_request.cc',
     'async_request.h',
     'dispatcher.cc',
@@ -13,6 +15,8 @@
     'native_list.h',
     'object_table.cc',
     'object_table.h',
+    'user_profile.cc',
+    'user_profile.h',
     'xam_content.cc',
     'xam_content.h',
     'xam_info.cc',
@@ -30,10 +34,14 @@
     'xam_ordinals.h',
     'xam_private.h',
     'xam_table.inc',
+    'xam_ui.cc',
+    'xam_ui.h',
     'xam_user.cc',
     'xam_user.h',
     'xam_video.cc',
     'xam_video.h',
+    'xam_voice.cc',
+    'xam_voice.h',
     'xboxkrnl_audio.cc',
     'xboxkrnl_audio.h',
     'xboxkrnl_debug.cc',
@@ -63,6 +71,8 @@
     'xboxkrnl_table.inc',
     'xboxkrnl_threading.cc',
     'xboxkrnl_threading.h',
+    'xboxkrnl_usbcam.cc',
+    'xboxkrnl_usbcam.h',
     'xboxkrnl_video.cc',
     'xboxkrnl_video.h',
     'xobject.cc',
@@ -70,6 +80,7 @@
   ],
 
   'includes': [
+    'apps/sources.gypi',
     'fs/sources.gypi',
     'objects/sources.gypi',
     'util/sources.gypi',

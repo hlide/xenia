@@ -15,7 +15,10 @@
 #include <xenia/kernel/xboxkrnl_module.h>
 #include <xenia/kernel/xboxkrnl_private.h>
 #include <xenia/kernel/xobject.h>
+#include <xenia/kernel/apps/apps.h>
+#include <xenia/kernel/objects/xevent.h>
 #include <xenia/kernel/objects/xmodule.h>
+#include <xenia/kernel/objects/xnotify_listener.h>
 #include <xenia/kernel/objects/xthread.h>
 #include <xenia/kernel/objects/xuser_module.h>
 
@@ -38,11 +41,16 @@ KernelState::KernelState(Emulator* emulator) :
 
   dispatcher_   = new Dispatcher(this);
 
+  app_manager_  = std::make_unique<XAppManager>();
+  user_profile_ = std::make_unique<UserProfile>();
+
   object_table_ = new ObjectTable();
   object_mutex_ = xe_mutex_alloc(10000);
 
-  XEASSERTNULL(shared_kernel_state_);
+  assert_null(shared_kernel_state_);
   shared_kernel_state_ = this;
+
+  apps::RegisterApps(this, app_manager_.get());
 }
 
 KernelState::~KernelState() {
@@ -52,9 +60,12 @@ KernelState::~KernelState() {
   xe_mutex_free(object_mutex_);
   delete object_table_;
 
+  // Shutdown apps.
+  app_manager_.reset();
+
   delete dispatcher_;
 
-  XEASSERT(shared_kernel_state_ == this);
+  assert_true(shared_kernel_state_ == this);
   shared_kernel_state_ = NULL;
 }
 
@@ -80,7 +91,7 @@ XModule* KernelState::GetModule(const char* name) {
     return NULL;
   } else {
     // TODO(benvanik): support user modules/loading/etc.
-    XEASSERTALWAYS();
+    assert_always();
     return NULL;
   }
 }
@@ -134,4 +145,64 @@ XThread* KernelState::GetThreadByID(uint32_t thread_id) {
   }
   xe_mutex_unlock(object_mutex_);
   return thread;
+}
+
+void KernelState::RegisterNotifyListener(XNotifyListener* listener) {
+  xe_mutex_lock(object_mutex_);
+  notify_listeners_.push_back(listener);
+  xe_mutex_unlock(object_mutex_);
+}
+
+void KernelState::UnregisterNotifyListener(XNotifyListener* listener) {
+  xe_mutex_lock(object_mutex_);
+  for (auto it = notify_listeners_.begin(); it != notify_listeners_.end();
+       ++it) {
+    if (*it == listener) {
+      notify_listeners_.erase(it);
+      break;
+    }
+  }
+  xe_mutex_unlock(object_mutex_);
+}
+
+void KernelState::BroadcastNotification(XNotificationID id, uint32_t data) {
+  xe_mutex_lock(object_mutex_);
+  for (auto it = notify_listeners_.begin(); it != notify_listeners_.end();
+       ++it) {
+    (*it)->EnqueueNotification(id, data);
+  }
+  xe_mutex_unlock(object_mutex_);
+}
+
+void KernelState::CompleteOverlapped(uint32_t overlapped_ptr, X_RESULT result, uint32_t length) {
+  auto ptr = memory()->membase() + overlapped_ptr;
+  XOverlappedSetResult(ptr, result);
+  XOverlappedSetLength(ptr, length);
+  XOverlappedSetExtendedError(ptr, result);
+  X_HANDLE event_handle = XOverlappedGetEvent(ptr);
+  if (event_handle) {
+    XEvent* ev = nullptr;
+    if (XSUCCEEDED(object_table()->GetObject(
+        event_handle, reinterpret_cast<XObject**>(&ev)))) {
+      ev->Set(0, false);
+      ev->Release();
+    }
+  }
+  if (XOverlappedGetCompletionRoutine(ptr)) {
+    assert_always();
+    X_HANDLE thread_handle = XOverlappedGetContext(ptr);
+    XThread* thread = nullptr;
+    if (XSUCCEEDED(object_table()->GetObject(
+        thread_handle, reinterpret_cast<XObject**>(&thread)))) {
+      // TODO(benvanik): queue APC on the thread that requested the overlapped operation.
+      thread->Release();
+    }
+  }
+}
+
+void KernelState::CompleteOverlappedImmediate(uint32_t overlapped_ptr, X_RESULT result, uint32_t length) {
+  auto ptr = memory()->membase() + overlapped_ptr;
+  XOverlappedSetContext(ptr,
+                        XThread::GetCurrentThreadHandle());
+  CompleteOverlapped(overlapped_ptr, result, length);
 }

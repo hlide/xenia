@@ -9,6 +9,8 @@
 
 #include <xenia/kernel/objects/xthread.h>
 
+#include <poly/math.h>
+
 #include <xenia/cpu/cpu.h>
 #include <xenia/kernel/native_list.h>
 #include <xenia/kernel/xboxkrnl_threading.h>
@@ -47,11 +49,14 @@ XThread::XThread(KernelState* kernel_state,
   creation_params_.xapi_thread_startup  = xapi_thread_startup;
   creation_params_.start_address        = start_address;
   creation_params_.start_context        = start_context;
+
+  // top 8 bits = processor ID (or 0 for default)
+  // bit 0 = 1 to create suspended
   creation_params_.creation_flags       = creation_flags;
 
   // Adjust stack size - min of 16k.
-  if (creation_params_.stack_size < 16 * 1024 * 1024) {
-    creation_params_.stack_size = 16 * 1024 * 1024;
+  if (creation_params_.stack_size < 16 * 1024) {
+    creation_params_.stack_size = 16 * 1024;
   }
 
   apc_lock_ = xe_mutex_alloc();
@@ -77,6 +82,9 @@ XThread::~XThread() {
 
   if (thread_state_) {
     delete thread_state_;
+  }
+  if (scratch_address_) {
+    kernel_state()->memory()->HeapFree(scratch_address_, 0);
   }
   if (tls_address_) {
     kernel_state()->memory()->HeapFree(tls_address_, 0);
@@ -117,7 +125,7 @@ uint32_t XThread::GetCurrentThreadHandle() {
 }
 
 uint32_t XThread::GetCurrentThreadId(const uint8_t* thread_state_block) {
-  return XEGETUINT32BE(thread_state_block + 0x14C);
+  return poly::load_and_swap<uint32_t>(thread_state_block + 0x14C);
 }
 
 uint32_t XThread::thread_state() {
@@ -130,12 +138,12 @@ uint32_t XThread::thread_id() {
 
 uint32_t XThread::last_error() {
   uint8_t *p = memory()->Translate(thread_state_address_);
-  return XEGETUINT32BE(p + 0x160);
+  return poly::load_and_swap<uint32_t>(p + 0x160);
 }
 
 void XThread::set_last_error(uint32_t error_code) {
   uint8_t *p = memory()->Translate(thread_state_address_);
-  XESETUINT32BE(p + 0x160, error_code);
+  poly::store_and_swap<uint32_t>(p + 0x160, error_code);
 }
 
 void XThread::set_name(const char* name) {
@@ -194,6 +202,12 @@ X_STATUS XThread::Create() {
 
   XUserModule* module = kernel_state()->GetExecutableModule();
 
+  // Allocate thread scratch.
+  // This is used by interrupts/APCs/etc so we can round-trip pointers through.
+  scratch_size_ = 4 * 16;
+  scratch_address_ = (uint32_t)memory()->HeapAlloc(
+      0, scratch_size_, MEMORY_FLAG_ZERO);
+
   // Allocate TLS block.
   const xe_xex2_header_t* header = module->xex_header();
   uint32_t tls_size = header->tls_info.slot_count * header->tls_info.data_size;
@@ -212,11 +226,11 @@ X_STATUS XThread::Create() {
 
   // Setup the thread state block (last error/etc).
   uint8_t *p = memory()->Translate(thread_state_address_);
-  XESETUINT32BE(p + 0x000, tls_address_);
-  XESETUINT32BE(p + 0x100, thread_state_address_);
-  XESETUINT32BE(p + 0x14C, thread_id_);
-  XESETUINT32BE(p + 0x150, 0); // ?
-  XESETUINT32BE(p + 0x160, 0); // last error
+  poly::store_and_swap<uint32_t>(p + 0x000, tls_address_);
+  poly::store_and_swap<uint32_t>(p + 0x100, thread_state_address_);
+  poly::store_and_swap<uint32_t>(p + 0x14C, thread_id_);
+  poly::store_and_swap<uint32_t>(p + 0x150, 0); // ?
+  poly::store_and_swap<uint32_t>(p + 0x160, 0); // last error
 
   // Allocate processor thread state.
   // This is thread safe.
@@ -235,6 +249,11 @@ X_STATUS XThread::Create() {
   xesnprintfa(thread_name, XECOUNT(thread_name), "XThread%04X", handle());
   set_name(thread_name);
 
+  uint32_t proc_mask = creation_params_.creation_flags >> 24;
+  if (proc_mask) {
+    SetAffinity(proc_mask);
+  }
+
   module->Release();
   return X_STATUS_SUCCESS;
 }
@@ -244,6 +263,7 @@ X_STATUS XThread::Exit(int exit_code) {
 
   // TODO(benvanik); dispatch events? waiters? etc?
   event_->Set(0, false);
+  RundownAPCs();
 
   // NOTE: unless PlatformExit fails, expect it to never return!
   X_STATUS return_code = PlatformExit(exit_code);
@@ -267,12 +287,13 @@ static uint32_t __stdcall XThreadStartCallbackWin32(void* param) {
 }
 
 X_STATUS XThread::PlatformCreate() {
+  bool suspended = creation_params_.creation_flags & 0x1;
   thread_handle_ = CreateThread(
       NULL,
       creation_params_.stack_size,
       (LPTHREAD_START_ROUTINE)XThreadStartCallbackWin32,
       this,
-      creation_params_.creation_flags,
+      suspended ? CREATE_SUSPENDED : 0,
       NULL);
   if (!thread_handle_) {
     uint32_t last_error = GetLastError();
@@ -315,7 +336,7 @@ X_STATUS XThread::PlatformCreate() {
   pthread_attr_setstacksize(&attr, creation_params_.stack_size);
 
   int result_code;
-  if (creation_params_.creation_flags & X_CREATE_SUSPENDED) {
+  if (creation_params_.creation_flags & 0x1) {
 #if XE_PLATFORM_OSX
     result_code = pthread_create_suspended_np(
         reinterpret_cast<pthread_t*>(&thread_handle_),
@@ -324,7 +345,7 @@ X_STATUS XThread::PlatformCreate() {
         this);
 #else
     // TODO(benvanik): pthread_create_suspended_np on linux
-    XEASSERTALWAYS();
+    assert_always();
 #endif  // OSX
   } else {
     result_code = pthread_create(
@@ -365,15 +386,21 @@ void XThread::Execute() {
   // If a XapiThreadStartup value is present, we use that as a trampoline.
   // Otherwise, we are a raw thread.
   if (creation_params_.xapi_thread_startup) {
+    uint64_t args[] = {
+      creation_params_.start_address,
+      creation_params_.start_context
+    };
     kernel_state()->processor()->Execute(
         thread_state_,
-        creation_params_.xapi_thread_startup,
-        creation_params_.start_address, creation_params_.start_context);
+        creation_params_.xapi_thread_startup, args, XECOUNT(args));
   } else {
     // Run user code.
+    uint64_t args[] = {
+      creation_params_.start_context
+    };
     int exit_code = (int)kernel_state()->processor()->Execute(
         thread_state_,
-        creation_params_.start_address, creation_params_.start_context);
+        creation_params_.start_address, args, XECOUNT(args));
     // If we got here it means the execute completed without an exit being called.
     // Treat the return code as an implicit exit code.
     Exit(exit_code);
@@ -390,7 +417,7 @@ void XThread::LeaveCriticalRegion() {
 }
 
 uint32_t XThread::RaiseIrql(uint32_t new_irql) {
-  return xe_atomic_exchange_32(new_irql, &irql_);
+  return irql_.exchange(new_irql);
 }
 
 void XThread::LowerIrql(uint32_t new_irql) {
@@ -402,7 +429,99 @@ void XThread::LockApc() {
 }
 
 void XThread::UnlockApc() {
+  bool needs_apc = apc_list_->HasPending();
   xe_mutex_unlock(apc_lock_);
+  if (needs_apc) {
+    QueueUserAPC(reinterpret_cast<PAPCFUNC>(DeliverAPCs),
+                 thread_handle_,
+                 reinterpret_cast<ULONG_PTR>(this));
+  }
+}
+
+void XThread::DeliverAPCs(void* data) {
+  // http://www.drdobbs.com/inside-nts-asynchronous-procedure-call/184416590?pgno=1
+  // http://www.drdobbs.com/inside-nts-asynchronous-procedure-call/184416590?pgno=7
+  XThread* thread = reinterpret_cast<XThread*>(data);
+  auto membase = thread->memory()->membase();
+  auto processor = thread->kernel_state()->processor();
+  auto apc_list = thread->apc_list();
+  thread->LockApc();
+  while (apc_list->HasPending()) {
+    // Get APC entry (offset for LIST_ENTRY offset) and cache what we need.
+    // Calling the routine may delete the memory/overwrite it.
+    uint32_t apc_address = apc_list->Shift() - 8;
+    uint8_t* apc_ptr = membase + apc_address;
+    uint32_t kernel_routine = poly::load_and_swap<uint32_t>(apc_ptr + 16);
+    uint32_t normal_routine = poly::load_and_swap<uint32_t>(apc_ptr + 24);
+    uint32_t normal_context = poly::load_and_swap<uint32_t>(apc_ptr + 28);
+    uint32_t system_arg1 = poly::load_and_swap<uint32_t>(apc_ptr + 32);
+    uint32_t system_arg2 = poly::load_and_swap<uint32_t>(apc_ptr + 36);
+
+    // Mark as uninserted so that it can be reinserted again by the routine.
+    uint32_t old_flags = poly::load_and_swap<uint32_t>(apc_ptr + 40);
+    poly::store_and_swap<uint32_t>(apc_ptr + 40, old_flags & ~0xFF00);
+
+    // Call kernel routine.
+    // The routine can modify all of its arguments before passing it on.
+    // Since we need to give guest accessible pointers over, we copy things
+    // into and out of scratch.
+    uint8_t* scratch_ptr = membase + thread->scratch_address_;
+    poly::store_and_swap<uint32_t>(scratch_ptr + 0, normal_routine);
+    poly::store_and_swap<uint32_t>(scratch_ptr + 4, normal_context);
+    poly::store_and_swap<uint32_t>(scratch_ptr + 8, system_arg1);
+    poly::store_and_swap<uint32_t>(scratch_ptr + 12, system_arg2);
+    // kernel_routine(apc_address, &normal_routine, &normal_context, &system_arg1, &system_arg2)
+    uint64_t kernel_args[] = {
+      apc_address,
+      thread->scratch_address_ + 0,
+      thread->scratch_address_ + 4,
+      thread->scratch_address_ + 8,
+      thread->scratch_address_ + 12,
+    };
+    processor->ExecuteInterrupt(
+        0, kernel_routine, kernel_args, XECOUNT(kernel_args));
+    normal_routine = poly::load_and_swap<uint32_t>(scratch_ptr + 0);
+    normal_context = poly::load_and_swap<uint32_t>(scratch_ptr + 4);
+    system_arg1 = poly::load_and_swap<uint32_t>(scratch_ptr + 8);
+    system_arg2 = poly::load_and_swap<uint32_t>(scratch_ptr + 12);
+
+    // Call the normal routine. Note that it may have been killed by the kernel
+    // routine.
+    if (normal_routine) {
+      thread->UnlockApc();
+      // normal_routine(normal_context, system_arg1, system_arg2)
+      uint64_t normal_args[] = { normal_context, system_arg1, system_arg2 };
+      processor->ExecuteInterrupt(
+          0, normal_routine, normal_args, XECOUNT(normal_args));
+      thread->LockApc();
+    }
+  }
+  thread->UnlockApc();
+}
+
+void XThread::RundownAPCs() {
+  auto membase = memory()->membase();
+  LockApc();
+  while (apc_list_->HasPending()) {
+    // Get APC entry (offset for LIST_ENTRY offset) and cache what we need.
+    // Calling the routine may delete the memory/overwrite it.
+    uint32_t apc_address = apc_list_->Shift() - 8;
+    uint8_t* apc_ptr = membase + apc_address;
+    uint32_t rundown_routine = poly::load_and_swap<uint32_t>(apc_ptr + 20);
+
+    // Mark as uninserted so that it can be reinserted again by the routine.
+    uint32_t old_flags = poly::load_and_swap<uint32_t>(apc_ptr + 40);
+    poly::store_and_swap<uint32_t>(apc_ptr + 40, old_flags & ~0xFF00);
+
+    // Call the rundown routine.
+    if (rundown_routine) {
+      // rundown_routine(apc)
+      uint64_t args[] = { apc_address };
+      kernel_state()->processor()->ExecuteInterrupt(
+          0, rundown_routine, args, XECOUNT(args));
+    }
+  }
+  UnlockApc();
 }
 
 int32_t XThread::QueryPriority() {
@@ -411,6 +530,11 @@ int32_t XThread::QueryPriority() {
 
 void XThread::SetPriority(int32_t increment) {
   SetThreadPriority(thread_handle_, increment);
+}
+
+void XThread::SetAffinity(uint32_t affinity) {
+  // TODO(benvanik): implement.
+  XELOGW("KeSetAffinityThread not implemented");
 }
 
 X_STATUS XThread::Resume(uint32_t* out_suspend_count) {
@@ -444,7 +568,7 @@ X_STATUS XThread::Delay(
   if (timeout_ticks > 0) {
     // Absolute time, based on January 1, 1601.
     // TODO(benvanik): convert time to relative time.
-    XEASSERTALWAYS();
+    assert_always();
     timeout_ms = 0;
   } else if (timeout_ticks < 0) {
     // Relative time.

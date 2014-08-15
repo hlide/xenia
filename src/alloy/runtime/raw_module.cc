@@ -9,32 +9,27 @@
 
 #include <alloy/runtime/raw_module.h>
 
-using namespace alloy;
-using namespace alloy::runtime;
+namespace alloy {
+namespace runtime {
 
-
-RawModule::RawModule(Runtime* runtime) :
-    name_(0),
-    base_address_(0), low_address_(0), high_address_(0),
-    Module(runtime) {
-}
+RawModule::RawModule(Runtime* runtime)
+    : Module(runtime), base_address_(0), low_address_(0), high_address_(0) {}
 
 RawModule::~RawModule() {
   if (base_address_) {
     memory_->HeapFree(base_address_, high_address_ - low_address_);
   }
-  xe_free(name_);
 }
 
-int RawModule::LoadFile(uint64_t base_address, const char* path) {
-  FILE* file = fopen(path, "rb");
+int RawModule::LoadFile(uint64_t base_address, const std::string& path) {
+  FILE* file = fopen(path.c_str(), "rb");
   fseek(file, 0, SEEK_END);
   size_t file_length = ftell(file);
   fseek(file, 0, SEEK_SET);
 
   // Allocate memory.
-  base_address_ = memory_->HeapAlloc(
-      base_address, file_length, MEMORY_FLAG_ZERO);
+  base_address_ =
+      memory_->HeapAlloc(base_address, file_length, MEMORY_FLAG_ZERO);
   if (!base_address_) {
     fclose(file);
     return 1;
@@ -47,8 +42,12 @@ int RawModule::LoadFile(uint64_t base_address, const char* path) {
   fclose(file);
 
   // Setup debug info.
-  const char* name = xestrrchra(path, XE_PATH_SEPARATOR) + 1;
-  name_ = xestrdupa(name);
+  auto last_slash = path.find_last_of(poly::path_separator);
+  if (last_slash != std::string::npos) {
+    name_ = path.substr(last_slash + 1);
+  } else {
+    name_ = path;
+  }
   // TODO(benvanik): debug info
 
   low_address_ = base_address;
@@ -59,3 +58,6 @@ int RawModule::LoadFile(uint64_t base_address, const char* path) {
 bool RawModule::ContainsAddress(uint64_t address) {
   return address >= low_address_ && address < high_address_;
 }
+
+}  // namespace runtime
+}  // namespace alloy

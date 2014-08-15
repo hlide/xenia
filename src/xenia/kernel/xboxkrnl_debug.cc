@@ -168,7 +168,7 @@ SHIM_CALL DbgPrint_shim(
       local[0] = '\0';
       strncat(local, start, end + 1 - start);
 
-      XEASSERT(arg_size == 8 || arg_size == 4);
+      assert_true(arg_size == 8 || arg_size == 4);
       if (arg_size == 8) {
         if (arg_extras == 0) {
           uint64_t value = arg_index < 7
@@ -179,7 +179,7 @@ SHIM_CALL DbgPrint_shim(
           arg_index++;
         }
         else {
-          XEASSERT(false);
+          assert_true(false);
         }
       }
       else if (arg_size == 4) {
@@ -192,13 +192,13 @@ SHIM_CALL DbgPrint_shim(
           arg_index++;
         }
         else {
-          XEASSERT(false);
+          assert_true(false);
         }
       }
     }
     else if (*end == 'n')
     {
-      XEASSERT(arg_size == 4);
+      assert_true(arg_size == 4);
       if (arg_extras == 0) {
         uint32_t value = arg_index < 7
           ? SHIM_GET_ARG_32(1 + arg_index)
@@ -207,7 +207,7 @@ SHIM_CALL DbgPrint_shim(
         arg_index++;
       }
       else {
-        XEASSERT(false);
+        assert_true(false);
       }
     }
     else if (*end == 's' ||
@@ -216,7 +216,7 @@ SHIM_CALL DbgPrint_shim(
       local[0] = '\0';
       strncat(local, start, end + 1 - start);
 
-      XEASSERT(arg_size == 4);
+      assert_true(arg_size == 4);
       if (arg_extras == 0) {
         uint32_t value = arg_index < 7
           ? SHIM_GET_ARG_32(1 + arg_index)
@@ -227,11 +227,11 @@ SHIM_CALL DbgPrint_shim(
         arg_index++;
       }
       else {
-        XEASSERT(false);
+        assert_true(false);
       }
     }
     else {
-      XEASSERT(false);
+      assert_true(false);
       break;
     }
 
@@ -271,7 +271,7 @@ SHIM_CALL RtlRaiseException_shim(
     // SetThreadName. FFS.
     uint32_t thread_info_ptr = record_ptr + 20;
     uint32_t type = SHIM_MEM_32(thread_info_ptr + 0);
-    XEASSERT(type == 0x1000);
+    assert_true(type == 0x1000);
     uint32_t name_ptr = SHIM_MEM_32(thread_info_ptr + 4);
     uint32_t thread_id = SHIM_MEM_32(thread_info_ptr + 8);
 
@@ -288,14 +288,42 @@ SHIM_CALL RtlRaiseException_shim(
     }
 
     if (thread) {
+      XELOGD("SetThreadName(%d, %s)", thread->thread_id(), name);
       thread->set_name(name);
       thread->Release();
     }
+
+    // TODO(benvanik): unwinding required here?
+    return;
   }
 
   // TODO(benvanik): unwinding.
   // This is going to suck.
   DebugBreak();
+}
+
+
+void xeKeBugCheckEx(uint32_t code, uint32_t param1, uint32_t param2, uint32_t param3, uint32_t param4) {
+  XELOGD("*** STOP: 0x%.8X (0x%.8X, 0x%.8X, 0x%.8X, 0x%.8X)", code, param1, param2, param3, param4);
+  fflush(stdout);
+  DebugBreak();
+  assert_always();
+}
+
+SHIM_CALL KeBugCheck_shim(
+    PPCContext* ppc_state, KernelState* state) {
+  uint32_t code = SHIM_GET_ARG_32(0);
+  xeKeBugCheckEx(code, 0, 0, 0, 0);
+}
+
+SHIM_CALL KeBugCheckEx_shim(
+    PPCContext* ppc_state, KernelState* state) {
+  uint32_t code = SHIM_GET_ARG_32(0);
+  uint32_t param1 = SHIM_GET_ARG_32(1);
+  uint32_t param2 = SHIM_GET_ARG_32(2);
+  uint32_t param3 = SHIM_GET_ARG_32(3);
+  uint32_t param4 = SHIM_GET_ARG_32(4);
+  xeKeBugCheckEx(code, param1, param2, param3, param4);
 }
 
 
@@ -308,4 +336,6 @@ void xe::kernel::xboxkrnl::RegisterDebugExports(
   SHIM_SET_MAPPING("xboxkrnl.exe", DbgPrint, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", DbgBreakPoint, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", RtlRaiseException, state);
+  SHIM_SET_MAPPING("xboxkrnl.exe", KeBugCheck, state);
+  SHIM_SET_MAPPING("xboxkrnl.exe", KeBugCheckEx, state);
 }

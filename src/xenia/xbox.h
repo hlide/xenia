@@ -43,6 +43,7 @@ typedef uint32_t X_STATUS;
 #define X_STATUS_INVALID_HANDLE                         ((X_STATUS)0xC0000008L)
 #define X_STATUS_INVALID_PARAMETER                      ((X_STATUS)0xC000000DL)
 #define X_STATUS_NO_SUCH_FILE                           ((X_STATUS)0xC000000FL)
+#define X_STATUS_END_OF_FILE                            ((X_STATUS)0xC0000011L)
 #define X_STATUS_NO_MEMORY                              ((X_STATUS)0xC0000017L)
 #define X_STATUS_ALREADY_COMMITTED                      ((X_STATUS)0xC0000021L)
 #define X_STATUS_ACCESS_DENIED                          ((X_STATUS)0xC0000022L)
@@ -59,9 +60,12 @@ typedef uint32_t X_STATUS;
 // Adding as needed.
 typedef uint32_t X_RESULT;
 #define X_FACILITY_WIN32 7
-#define X_HRESULT_FROM_WIN32(x) ((X_RESULT)(x) <= 0 ? ((X_RESULT)(x)) : ((X_RESULT) (((x) & 0x0000FFFF) | (X_FACILITY_WIN32 << 16) | 0x80000000)))
+#define X_HRESULT_FROM_WIN32(x) x //((X_RESULT)(x) <= 0 ? ((X_RESULT)(x)) : ((X_RESULT) (((x) & 0x0000FFFF) | (X_FACILITY_WIN32 << 16) | 0x80000000)))
 #define X_ERROR_SUCCESS                                 X_HRESULT_FROM_WIN32(0x00000000L)
 #define X_ERROR_ACCESS_DENIED                           X_HRESULT_FROM_WIN32(0x00000005L)
+#define X_ERROR_INVALID_HANDLE                          X_HRESULT_FROM_WIN32(0x00000006L)
+#define X_ERROR_NO_MORE_FILES                           X_HRESULT_FROM_WIN32(0x00000018L)
+#define X_ERROR_IO_PENDING                              X_HRESULT_FROM_WIN32(0x000003E5L)
 #define X_ERROR_INSUFFICIENT_BUFFER                     X_HRESULT_FROM_WIN32(0x0000007AL)
 #define X_ERROR_BAD_ARGUMENTS                           X_HRESULT_FROM_WIN32(0x000000A0L)
 #define X_ERROR_BUSY                                    X_HRESULT_FROM_WIN32(0x000000AAL)
@@ -112,6 +116,11 @@ typedef uint32_t X_RESULT;
 #define X_PROCTYPE_IDLE   0
 #define X_PROCTYPE_USER   1
 #define X_PROCTYPE_SYSTEM 2
+
+
+// Sockets/networking.
+#define X_INVALID_SOCKET          (uint32_t)(~0)
+#define X_SOCKET_ERROR            (uint32_t)(-1)
 
 
 // Thread enums.
@@ -184,6 +193,39 @@ typedef enum _X_FILE_INFORMATION_CLASS {
 } X_FILE_INFORMATION_CLASS;
 
 
+inline void XOverlappedSetResult(void* ptr, uint32_t value) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  poly::store_and_swap<uint32_t>(&p[0], value);
+}
+inline void XOverlappedSetLength(void* ptr, uint32_t value) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  poly::store_and_swap<uint32_t>(&p[1], value);
+}
+inline uint32_t XOverlappedGetContext(void* ptr) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  return poly::load_and_swap<uint32_t>(&p[2]);
+}
+inline void XOverlappedSetContext(void* ptr, uint32_t value) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  poly::store_and_swap<uint32_t>(&p[2], value);
+}
+inline void XOverlappedSetExtendedError(void* ptr, uint32_t value) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  poly::store_and_swap<uint32_t>(&p[7], value);
+}
+inline X_HANDLE XOverlappedGetEvent(void* ptr) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  return poly::load_and_swap<uint32_t>(&p[4]);
+}
+inline uint32_t XOverlappedGetCompletionRoutine(void* ptr) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  return poly::load_and_swap<uint32_t>(&p[5]);
+}
+inline uint32_t XOverlappedGetCompletionContext(void* ptr) {
+  auto p = reinterpret_cast<uint32_t*>(ptr);
+  return poly::load_and_swap<uint32_t>(&p[6]);
+}
+
 class X_ANSI_STRING {
 private:
   uint16_t    length;
@@ -198,10 +240,10 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    length = XEGETUINT16BE(base + p);
-    maximum_length = XEGETUINT16BE(base + p + 2);
+    length = poly::load_and_swap<uint16_t>(base + p);
+    maximum_length = poly::load_and_swap<uint16_t>(base + p + 2);
     if (maximum_length) {
-      buffer = (const char*)(base + XEGETUINT32BE(base + p + 4));
+      buffer = (const char*)(base + poly::load_and_swap<uint32_t>(base + p + 4));
     } else {
       buffer = 0;
     }
@@ -235,14 +277,14 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    root_directory  = XEGETUINT32BE(base + p);
-    object_name_ptr = XEGETUINT32BE(base + p + 4);
+    root_directory  = poly::load_and_swap<uint32_t>(base + p);
+    object_name_ptr = poly::load_and_swap<uint32_t>(base + p + 4);
     if (object_name_ptr) {
       object_name.Read(base, object_name_ptr);
     } else {
       object_name.Zero();
     }
-    attributes      = XEGETUINT32BE(base + p + 8);
+    attributes      = poly::load_and_swap<uint32_t>(base + p + 8);
   }
   void Zero() {
     root_directory = 0;
@@ -251,6 +293,10 @@ public:
     attributes = 0;
   }
 };
+
+
+// Values seem to be all over the place - GUIDs?
+typedef uint32_t XNotificationID;
 
 
 typedef enum _X_INPUT_FLAG {
@@ -291,22 +337,22 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    buttons = XEGETUINT16BE(base + p);
-    left_trigger = XEGETUINT8BE(base + p + 2);
-    right_trigger = XEGETUINT8BE(base + p + 3);
-    thumb_lx = XEGETINT16BE(base + p + 4);
-    thumb_ly = XEGETINT16BE(base + p + 6);
-    thumb_rx = XEGETINT16BE(base + p + 8);
-    thumb_ry = XEGETINT16BE(base + p + 10);
+    buttons = poly::load_and_swap<uint16_t>(base + p);
+    left_trigger = poly::load_and_swap<uint8_t>(base + p + 2);
+    right_trigger = poly::load_and_swap<uint8_t>(base + p + 3);
+    thumb_lx = poly::load_and_swap<int16_t>(base + p + 4);
+    thumb_ly = poly::load_and_swap<int16_t>(base + p + 6);
+    thumb_rx = poly::load_and_swap<int16_t>(base + p + 8);
+    thumb_ry = poly::load_and_swap<int16_t>(base + p + 10);
   }
   void Write(uint8_t* base, uint32_t p) {
-    XESETUINT16BE(base + p, buttons);
-    XESETUINT8BE(base + p + 2, left_trigger);
-    XESETUINT8BE(base + p + 3, right_trigger);
-    XESETINT16BE(base + p + 4, thumb_lx);
-    XESETINT16BE(base + p + 6, thumb_ly);
-    XESETINT16BE(base + p + 8, thumb_rx);
-    XESETINT16BE(base + p + 10, thumb_ry);
+    poly::store_and_swap<uint16_t>(base + p, buttons);
+    poly::store_and_swap<uint8_t>(base + p + 2, left_trigger);
+    poly::store_and_swap<uint8_t>(base + p + 3, right_trigger);
+    poly::store_and_swap<int16_t>(base + p + 4, thumb_lx);
+    poly::store_and_swap<int16_t>(base + p + 6, thumb_ly);
+    poly::store_and_swap<int16_t>(base + p + 8, thumb_rx);
+    poly::store_and_swap<int16_t>(base + p + 10, thumb_ry);
   }
   void Zero() {
     buttons = 0;
@@ -326,11 +372,11 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    packet_number = XEGETUINT32BE(base + p);
+    packet_number = poly::load_and_swap<uint32_t>(base + p);
     gamepad.Read(base, p + 4);
   }
   void Write(uint8_t* base, uint32_t p) {
-    XESETUINT32BE(base + p, packet_number);
+    poly::store_and_swap<uint32_t>(base + p, packet_number);
     gamepad.Write(base, p + 4);
   }
   void Zero() {
@@ -350,12 +396,12 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    left_motor_speed  = XEGETUINT16BE(base + p);
-    right_motor_speed = XEGETUINT16BE(base + p + 2);
+    left_motor_speed  = poly::load_and_swap<uint16_t>(base + p);
+    right_motor_speed = poly::load_and_swap<uint16_t>(base + p + 2);
   }
   void Write(uint8_t* base, uint32_t p) {
-    XESETUINT16BE(base + p, left_motor_speed);
-    XESETUINT16BE(base + p + 2, right_motor_speed);
+    poly::store_and_swap<uint16_t>(base + p, left_motor_speed);
+    poly::store_and_swap<uint16_t>(base + p + 2, right_motor_speed);
   }
   void Zero() {
     left_motor_speed = right_motor_speed = 0;
@@ -376,16 +422,16 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    type      = XEGETUINT8BE(base + p);
-    sub_type  = XEGETUINT8BE(base + p + 1);
-    flags     = XEGETUINT16BE(base + p + 2);
+    type      = poly::load_and_swap<uint8_t>(base + p);
+    sub_type  = poly::load_and_swap<uint8_t>(base + p + 1);
+    flags     = poly::load_and_swap<uint16_t>(base + p + 2);
     gamepad.Read(base, p + 4);
     vibration.Read(base, p + 4 + 12);
   }
   void Write(uint8_t* base, uint32_t p) {
-    XESETUINT8BE(base + p, type);
-    XESETUINT8BE(base + p + 1, sub_type);
-    XESETUINT16BE(base + p + 2, flags);
+    poly::store_and_swap<uint8_t>(base + p, type);
+    poly::store_and_swap<uint8_t>(base + p + 1, sub_type);
+    poly::store_and_swap<uint16_t>(base + p + 2, flags);
     gamepad.Write(base, p + 4);
     vibration.Write(base, p + 4 + 12);
   }
@@ -413,18 +459,18 @@ public:
     Read(base, p);
   }
   void Read(const uint8_t* base, uint32_t p) {
-    virtual_key = XEGETUINT16BE(base + p + 0);
-    unicode     = XEGETUINT16BE(base + p + 2);
-    flags       = XEGETUINT16BE(base + p + 4);
-    user_index  = XEGETUINT8BE(base + p + 6);
-    hid_code    = XEGETUINT8BE(base + p + 7);
+    virtual_key = poly::load_and_swap<uint16_t>(base + p + 0);
+    unicode     = poly::load_and_swap<uint16_t>(base + p + 2);
+    flags       = poly::load_and_swap<uint16_t>(base + p + 4);
+    user_index  = poly::load_and_swap<uint8_t>(base + p + 6);
+    hid_code    = poly::load_and_swap<uint8_t>(base + p + 7);
   }
   void Write(uint8_t* base, uint32_t p) {
-    XESETUINT16BE(base + p + 0, virtual_key);
-    XESETUINT16BE(base + p + 2, unicode);
-    XESETUINT16BE(base + p + 4, flags);
-    XESETUINT8BE(base + p + 6, user_index);
-    XESETUINT8BE(base + p + 7, hid_code);
+    poly::store_and_swap<uint16_t>(base + p + 0, virtual_key);
+    poly::store_and_swap<uint16_t>(base + p + 2, unicode);
+    poly::store_and_swap<uint16_t>(base + p + 4, flags);
+    poly::store_and_swap<uint8_t>(base + p + 6, user_index);
+    poly::store_and_swap<uint8_t>(base + p + 7, hid_code);
   }
   void Zero() {
     virtual_key = 0;

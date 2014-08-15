@@ -10,7 +10,6 @@
 #include <alloy/frontend/ppc/ppc_hir_builder.h>
 
 #include <alloy/alloy-private.h>
-#include <alloy/frontend/tracing.h>
 #include <alloy/frontend/ppc/ppc_context.h>
 #include <alloy/frontend/ppc/ppc_disasm.h>
 #include <alloy/frontend/ppc/ppc_frontend.h>
@@ -18,22 +17,23 @@
 #include <alloy/hir/label.h>
 #include <alloy/runtime/runtime.h>
 
-using namespace alloy;
-using namespace alloy::frontend;
-using namespace alloy::frontend::ppc;
+namespace alloy {
+namespace frontend {
+namespace ppc {
+
+// TODO(benvanik): remove when enums redefined.
 using namespace alloy::hir;
-using namespace alloy::runtime;
 
+using alloy::hir::Label;
+using alloy::hir::TypeName;
+using alloy::hir::Value;
+using alloy::runtime::Runtime;
+using alloy::runtime::FunctionInfo;
 
-PPCHIRBuilder::PPCHIRBuilder(PPCFrontend* frontend) :
-    frontend_(frontend),
-    HIRBuilder() {
-  comment_buffer_ = new StringBuffer(4096);
-}
+PPCHIRBuilder::PPCHIRBuilder(PPCFrontend* frontend)
+    : HIRBuilder(), frontend_(frontend), comment_buffer_(4096) {}
 
-PPCHIRBuilder::~PPCHIRBuilder() {
-  delete comment_buffer_;
-}
+PPCHIRBuilder::~PPCHIRBuilder() = default;
 
 void PPCHIRBuilder::Reset() {
   start_address_ = 0;
@@ -51,15 +51,13 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
 
   symbol_info_ = symbol_info;
   start_address_ = symbol_info->address();
-  instr_count_ =
-      (symbol_info->end_address() - symbol_info->address()) / 4 + 1;
+  instr_count_ = (symbol_info->end_address() - symbol_info->address()) / 4 + 1;
 
   with_debug_info_ = with_debug_info;
   if (with_debug_info_) {
-    Comment("%s fn %.8X-%.8X %s",
-            symbol_info->module()->name(),
+    Comment("%s fn %.8X-%.8X %s", symbol_info->module()->name().c_str(),
             symbol_info->address(), symbol_info->end_address(),
-            symbol_info->name());
+            symbol_info->name().c_str());
   }
 
   // Allocate offset list.
@@ -83,11 +81,9 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
   for (uint64_t address = start_address, offset = 0; address <= end_address;
        address += 4, offset++) {
     i.address = address;
-    i.code = XEGETUINT32BE(p + address);
+    i.code = poly::load_and_swap<uint32_t>(p + address);
     // TODO(benvanik): find a way to avoid using the opcode tables.
     i.type = GetInstrType(i.code);
-
-    Instr* prev_instr = last_instr();
 
     // Mark label, if we were assigned one earlier on in the walk.
     // We may still get a label, but it'll be inserted by LookupLabel
@@ -102,9 +98,9 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
       if (label) {
         AnnotateLabel(address, label);
       }
-      comment_buffer_->Reset();
-      DisasmPPC(i, comment_buffer_);
-      Comment("%.8X %.8X %s", address, i.code, comment_buffer_->GetString());
+      comment_buffer_.Reset();
+      DisasmPPC(i, &comment_buffer_);
+      Comment("%.8X %.8X %s", address, i.code, comment_buffer_.GetString());
       first_instr = last_instr();
     }
 
@@ -119,9 +115,9 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
     instr_offset_list_[offset] = first_instr;
 
     if (!i.type) {
-      XELOGCPU("Invalid instruction %.8X %.8X", i.address, i.code);
+      XELOGCPU("Invalid instruction %.8llX %.8X", i.address, i.code);
       Comment("INVALID!");
-      //TraceInvalidInstruction(i);
+      // TraceInvalidInstruction(i);
       continue;
     }
 
@@ -134,11 +130,11 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
     }
 
     if (!i.type->emit || emit(*this, i)) {
-      XELOGCPU("Unimplemented instr %.8X %.8X %s",
-               i.address, i.code, i.type->name);
+      XELOGCPU("Unimplemented instr %.8llX %.8X %s", i.address, i.code,
+               i.type->name);
       Comment("UNIMPLEMENTED!");
-      //DebugBreak();
-      //TraceInvalidInstruction(i);
+      // DebugBreak();
+      // TraceInvalidInstruction(i);
     }
   }
 
@@ -147,8 +143,7 @@ int PPCHIRBuilder::Emit(FunctionInfo* symbol_info, bool with_debug_info) {
 
 void PPCHIRBuilder::AnnotateLabel(uint64_t address, Label* label) {
   char name_buffer[13];
-  xesnprintfa(name_buffer, XECOUNT(name_buffer),
-              "loc_%.8X", (uint32_t)address);
+  xesnprintfa(name_buffer, XECOUNT(name_buffer), "loc_%.8X", (uint32_t)address);
   label->name = (char*)arena_->Alloc(sizeof(name_buffer));
   xe_copy_struct(label->name, name_buffer, sizeof(name_buffer));
 }
@@ -197,10 +192,10 @@ Label* PPCHIRBuilder::LookupLabel(uint64_t address) {
   return label;
 }
 
-//Value* PPCHIRBuilder::LoadXER() {
+// Value* PPCHIRBuilder::LoadXER() {
 //}
 //
-//void PPCHIRBuilder::StoreXER(Value* value) {
+// void PPCHIRBuilder::StoreXER(Value* value) {
 //}
 
 Value* PPCHIRBuilder::LoadLR() {
@@ -208,7 +203,7 @@ Value* PPCHIRBuilder::LoadLR() {
 }
 
 void PPCHIRBuilder::StoreLR(Value* value) {
-  XEASSERT(value->type == INT64_TYPE);
+  assert_true(value->type == INT64_TYPE);
   StoreContext(offsetof(PPCContext, lr), value);
 }
 
@@ -217,12 +212,12 @@ Value* PPCHIRBuilder::LoadCTR() {
 }
 
 void PPCHIRBuilder::StoreCTR(Value* value) {
-  XEASSERT(value->type == INT64_TYPE);
+  assert_true(value->type == INT64_TYPE);
   StoreContext(offsetof(PPCContext, ctr), value);
 }
 
 Value* PPCHIRBuilder::LoadCR(uint32_t n) {
-  XEASSERTALWAYS();
+  assert_always();
   return 0;
 }
 
@@ -232,16 +227,19 @@ Value* PPCHIRBuilder::LoadCRField(uint32_t n, uint32_t bit) {
 
 void PPCHIRBuilder::StoreCR(uint32_t n, Value* value) {
   // TODO(benvanik): split bits out and store in values.
-  XEASSERTALWAYS();
+  assert_always();
 }
 
-void PPCHIRBuilder::UpdateCR(
-    uint32_t n, Value* lhs, bool is_signed) {
+void PPCHIRBuilder::StoreCRField(uint32_t n, uint32_t bit, Value* value) {
+  StoreContext(offsetof(PPCContext, cr0) + (4 * n) + bit, value);
+}
+
+void PPCHIRBuilder::UpdateCR(uint32_t n, Value* lhs, bool is_signed) {
   UpdateCR(n, lhs, LoadZero(lhs->type), is_signed);
 }
 
-void PPCHIRBuilder::UpdateCR(
-    uint32_t n, Value* lhs, Value* rhs, bool is_signed) {
+void PPCHIRBuilder::UpdateCR(uint32_t n, Value* lhs, Value* rhs,
+                             bool is_signed) {
   if (is_signed) {
     Value* lt = CompareSLT(lhs, rhs);
     StoreContext(offsetof(PPCContext, cr0) + (4 * n) + 0, lt);
@@ -264,25 +262,33 @@ void PPCHIRBuilder::UpdateCR6(Value* src_value) {
   // Testing for all 1's and all 0's.
   // if (Rc) CR6 = all_equal | 0 | none_equal | 0
   // TODO(benvanik): efficient instruction?
-  StoreContext(offsetof(PPCContext, cr6.cr6_all_equal), IsFalse(Not(src_value)));
+  StoreContext(offsetof(PPCContext, cr6.cr6_all_equal),
+               IsFalse(Not(src_value)));
   StoreContext(offsetof(PPCContext, cr6.cr6_none_equal), IsFalse(src_value));
 }
 
+Value* PPCHIRBuilder::LoadFPSCR() {
+  return LoadContext(offsetof(PPCContext, fpscr), INT64_TYPE);
+}
+
+void PPCHIRBuilder::StoreFPSCR(Value* value) {
+  assert_true(value->type == INT64_TYPE);
+  StoreContext(offsetof(PPCContext, fpscr), value);
+}
+
 Value* PPCHIRBuilder::LoadXER() {
-  XEASSERTALWAYS();
+  assert_always();
   return NULL;
 }
 
-void PPCHIRBuilder::StoreXER(Value* value) {
-  XEASSERTALWAYS();
-}
+void PPCHIRBuilder::StoreXER(Value* value) { assert_always(); }
 
 Value* PPCHIRBuilder::LoadCA() {
   return LoadContext(offsetof(PPCContext, xer_ca), INT8_TYPE);
 }
 
 void PPCHIRBuilder::StoreCA(Value* value) {
-  XEASSERT(value->type == INT8_TYPE);
+  assert_true(value->type == INT8_TYPE);
   StoreContext(offsetof(PPCContext, xer_ca), value);
 }
 
@@ -296,55 +302,53 @@ void PPCHIRBuilder::StoreSAT(Value* value) {
 }
 
 Value* PPCHIRBuilder::LoadGPR(uint32_t reg) {
-  return LoadContext(
-      offsetof(PPCContext, r) + reg * 8, INT64_TYPE);
+  return LoadContext(offsetof(PPCContext, r) + reg * 8, INT64_TYPE);
 }
 
 void PPCHIRBuilder::StoreGPR(uint32_t reg, Value* value) {
-  XEASSERT(value->type == INT64_TYPE);
-  StoreContext(
-      offsetof(PPCContext, r) + reg * 8, value);
+  assert_true(value->type == INT64_TYPE);
+  StoreContext(offsetof(PPCContext, r) + reg * 8, value);
 }
 
 Value* PPCHIRBuilder::LoadFPR(uint32_t reg) {
-  return LoadContext(
-      offsetof(PPCContext, f) + reg * 8, FLOAT64_TYPE);
+  return LoadContext(offsetof(PPCContext, f) + reg * 8, FLOAT64_TYPE);
 }
 
 void PPCHIRBuilder::StoreFPR(uint32_t reg, Value* value) {
-  XEASSERT(value->type == FLOAT64_TYPE);
-  StoreContext(
-      offsetof(PPCContext, f) + reg * 8, value);
+  assert_true(value->type == FLOAT64_TYPE);
+  StoreContext(offsetof(PPCContext, f) + reg * 8, value);
 }
 
 Value* PPCHIRBuilder::LoadVR(uint32_t reg) {
-  return LoadContext(
-      offsetof(PPCContext, v) + reg * 16, VEC128_TYPE);
+  return LoadContext(offsetof(PPCContext, v) + reg * 16, VEC128_TYPE);
 }
 
 void PPCHIRBuilder::StoreVR(uint32_t reg, Value* value) {
-  XEASSERT(value->type == VEC128_TYPE);
-  StoreContext(
-      offsetof(PPCContext, v) + reg * 16, value);
+  assert_true(value->type == VEC128_TYPE);
+  StoreContext(offsetof(PPCContext, v) + reg * 16, value);
 }
 
-Value* PPCHIRBuilder::LoadAcquire(
-    Value* address, TypeName type, uint32_t load_flags) {
-  AtomicExchange(
-      LoadContext(offsetof(PPCContext, reserve_address), INT64_TYPE),
-      Truncate(address, INT32_TYPE));
+Value* PPCHIRBuilder::LoadAcquire(Value* address, TypeName type,
+                                  uint32_t load_flags) {
+  AtomicExchange(LoadContext(offsetof(PPCContext, reserve_address), INT64_TYPE),
+                 Truncate(address, INT32_TYPE));
   return Load(address, type, load_flags);
 }
 
-Value* PPCHIRBuilder::StoreRelease(
-    Value* address, Value* value, uint32_t store_flags) {
+Value* PPCHIRBuilder::StoreRelease(Value* address, Value* value,
+                                   uint32_t store_flags) {
   Value* old_address = AtomicExchange(
       LoadContext(offsetof(PPCContext, reserve_address), INT64_TYPE),
       LoadZero(INT32_TYPE));
   Value* eq = CompareEQ(Truncate(address, INT32_TYPE), old_address);
+  StoreContext(offsetof(PPCContext, cr0.cr0_eq), eq);
   auto skip_label = NewLabel();
   BranchFalse(eq, skip_label, BRANCH_UNLIKELY);
   Store(address, value, store_flags);
   MarkLabel(skip_label);
   return eq;
 }
+
+}  // namespace ppc
+}  // namespace frontend
+}  // namespace alloy

@@ -43,7 +43,7 @@ X_STATUS xeExGetXConfigSetting(
       value = 0x00001000; // USA/Canada
       break;
     default:
-      XEASSERTALWAYS();
+      assert_unhandled_case(setting);
       return X_STATUS_INVALID_PARAMETER_2;
     }
     break;
@@ -80,12 +80,12 @@ X_STATUS xeExGetXConfigSetting(
       value = 0;
       break;
     default:
-      XEASSERTALWAYS();
+      assert_unhandled_case(setting);
       return X_STATUS_INVALID_PARAMETER_2;
     }
     break;
   default:
-    XEASSERTALWAYS();
+    assert_unhandled_case(category);
     return X_STATUS_INVALID_PARAMETER_1;
   }
 
@@ -97,7 +97,7 @@ X_STATUS xeExGetXConfigSetting(
   }
 
   if (buffer) {
-    XESETUINT32BE(buffer, value);
+    poly::store_and_swap<uint32_t>(buffer, value);
   }
   if (required_size) {
     *required_size = setting_size;
@@ -134,7 +134,7 @@ SHIM_CALL ExGetXConfigSetting_shim(
 
 int xeXexCheckExecutablePriviledge(uint32_t privilege) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   // BOOL
   // DWORD Privilege
@@ -176,7 +176,7 @@ SHIM_CALL XexCheckExecutablePrivilege_shim(
 int xeXexGetModuleHandle(const char* module_name,
                          X_HANDLE* module_handle_ptr) {
   KernelState* state = shared_kernel_state_;
-  XEASSERTNOTNULL(state);
+  assert_not_null(state);
 
   // BOOL
   // LPCSZ ModuleName

@@ -20,28 +20,11 @@ using namespace xe::gpu;
 using namespace xe::gpu::d3d11;
 
 
-namespace {
-
-void __stdcall D3D11GraphicsSystemVsyncCallback(
-    D3D11GraphicsSystem* gs, BOOLEAN) {
-  static bool thread_name_set = false;
-  if (!thread_name_set) {
-    thread_name_set = true;
-    Profiler::ThreadEnter("VsyncTimer");
-  }
-  SCOPE_profile_cpu_f("gpu");
-
-  gs->MarkVblank();
-  gs->DispatchInterruptCallback(0);
-}
-
-}
-
-
-D3D11GraphicsSystem::D3D11GraphicsSystem(Emulator* emulator) :
-    window_(0), dxgi_factory_(0), device_(0),
-    timer_queue_(NULL), vsync_timer_(NULL),
-    GraphicsSystem(emulator) {
+D3D11GraphicsSystem::D3D11GraphicsSystem(Emulator* emulator)
+    : GraphicsSystem(emulator),
+      window_(nullptr), dxgi_factory_(nullptr), device_(nullptr),
+      timer_queue_(nullptr), vsync_timer_(nullptr),
+      last_swap_time_(0.0) {
 }
 
 D3D11GraphicsSystem::~D3D11GraphicsSystem() {
@@ -50,14 +33,14 @@ D3D11GraphicsSystem::~D3D11GraphicsSystem() {
 void D3D11GraphicsSystem::Initialize() {
   GraphicsSystem::Initialize();
 
-  XEASSERTNULL(timer_queue_);
-  XEASSERTNULL(vsync_timer_);
+  assert_null(timer_queue_);
+  assert_null(vsync_timer_);
 
   timer_queue_ = CreateTimerQueue();
   CreateTimerQueueTimer(
       &vsync_timer_,
       timer_queue_,
-      (WAITORTIMERCALLBACK)D3D11GraphicsSystemVsyncCallback,
+      (WAITORTIMERCALLBACK)VsyncCallback,
       this,
       16,
       16,
@@ -128,7 +111,7 @@ void D3D11GraphicsSystem::Initialize() {
   // Create the window.
   // This will pump through the run-loop and and be where our swapping
   // will take place.
-  XEASSERTNULL(window_);
+  assert_null(window_);
   window_ = new D3D11Window(run_loop_, dxgi_factory_, device_);
   if (window_->Initialize("Xenia D3D11", 1280, 720)) {
     XELOGE("Failed to create D3D11Window");
@@ -143,44 +126,61 @@ void D3D11GraphicsSystem::Initialize() {
   // Create the driver.
   // This runs in the worker thread and builds command lines to present
   // in the window.
-  XEASSERTNULL(driver_);
+  assert_null(driver_);
   driver_ = new D3D11GraphicsDriver(
       memory_, window_->swap_chain(), device_);
+  if (driver_->Initialize()) {
+    XELOGE("Unable to initialize D3D11 driver");
+    return;
+  }
 
   // Initial vsync kick.
   DispatchInterruptCallback(0);
 }
 
 void D3D11GraphicsSystem::Pump() {
-  if (swap_pending_) {
-    swap_pending_ = false;
+  SCOPE_profile_cpu_f("gpu");
 
-    // TODO(benvanik): remove this when commands are understood.
-    driver_->Resolve();
-
-    // Swap window.
-    // If we are set to vsync this will block.
-    window_->Swap();
-
-    DispatchInterruptCallback(0);
-  } else {
-    double time_since_last_interrupt = xe_pal_now() - last_interrupt_time_;
-    if (time_since_last_interrupt > 0.5) {
-      // If we have gone too long without an interrupt, fire one.
-      DispatchInterruptCallback(0);
-    }
-    if (time_since_last_interrupt > 0.3) {
-      // Force a swap when profiling.
-      if (Profiler::is_enabled()) {
-        window_->Swap();
-      }
+  double time_since_last_swap = xe_pal_now() - last_swap_time_;
+  if (time_since_last_swap > 1.0) {
+    // Force a swap when profiling.
+    if (Profiler::is_enabled()) {
+      window_->Swap();
     }
   }
 }
 
+void D3D11GraphicsSystem::Swap() {
+  // TODO(benvanik): remove this when commands are understood.
+  driver_->Resolve();
+
+  // Swap window.
+  // If we are set to vsync this will block.
+  window_->Swap();
+
+  last_swap_time_ = xe_pal_now();
+}
+
+void __stdcall D3D11GraphicsSystem::VsyncCallback(D3D11GraphicsSystem* gs,
+                                                  BOOLEAN) {
+  static bool thread_name_set = false;
+  if (!thread_name_set) {
+    thread_name_set = true;
+    Profiler::ThreadEnter("VsyncTimer");
+  }
+  SCOPE_profile_cpu_f("gpu");
+
+  gs->MarkVblank();
+
+  // TODO(benvanik): we shouldn't need to do the dispatch here, but there's
+  //     something wrong and the CP will block waiting for code that
+  //     needs to be run in the interrupt.
+  gs->DispatchInterruptCallback(0);
+}
+
 void D3D11GraphicsSystem::Shutdown() {
   GraphicsSystem::Shutdown();
-  
+
   if (vsync_timer_) {
     DeleteTimerQueueTimer(timer_queue_, vsync_timer_, NULL);
   }

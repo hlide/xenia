@@ -20,7 +20,7 @@ that.
 
 ## Status
 
-* Some code runs. [Insert any game name here] doesn't.
+* Some code runs. [Insert any game name here] doesn't. Except Frogger 2. Yep.
 * Asserts! Crashes! Hangs! Blank screens!
 
 ## Disclaimer
@@ -47,7 +47,8 @@ update gyp files/etc.
 ## Building
 
 See [building](docs/building.md) for setup and information about the
-`xenia-build` script.
+`xenia-build` script. When writing code, check the [style guide](docs/style_guide.md)
+and be sure to clang-format!
 
 ## Contributors Wanted!
 
@@ -55,18 +56,12 @@ Have some spare time, know advanced C++, and want to write an emulator?
 Contribute! There's a ton of work that needs to be done, a lot of which
 is wide open greenfield fun.
 
-That said, the project is currently undergoing a lot of major foundational
-development and core pieces are changing rapidly and poorly documented.
-It'll be difficult to casually hack things in unless you know what you're
-doing.
-
 Fixes and optimizations are always welcome (please!), but in addition to
 that there are some major work areas still untouched:
 
-* Write an [OpenGL driver](https://github.com/benvanik/xenia/issues/59)
+* Help work through missing functionality/bugs in game [compat](https://github.com/benvanik/xenia/issues?labels=compat)
 * Add input drivers for [OSX](https://github.com/benvanik/xenia/issues/61) and [PS4 controllers](https://github.com/benvanik/xenia/issues/60) (or anything else)
 * Start [hacking on audio](https://github.com/benvanik/xenia/issues/62)
-* Support [loading of PIRS files](https://github.com/benvanik/xenia/issues/63)
 * Build a [virtual LIVE service](https://github.com/benvanik/xenia/issues/64)
 
 See more projects [good for contributors](https://github.com/benvanik/xenia/issues?labels=good+for+contributors&page=1&state=open). It's a good idea to ask on IRC/the bugs before beginning work

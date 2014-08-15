@@ -10,12 +10,16 @@
 #ifndef XENIA_KERNEL_KERNEL_STATE_H_
 #define XENIA_KERNEL_KERNEL_STATE_H_
 
+#include <memory>
+
 #include <xenia/common.h>
 #include <xenia/core.h>
 
 #include <xenia/export_resolver.h>
 #include <xenia/xbox.h>
+#include <xenia/kernel/app.h>
 #include <xenia/kernel/object_table.h>
+#include <xenia/kernel/user_profile.h>
 #include <xenia/kernel/fs/filesystem.h>
 
 
@@ -23,6 +27,7 @@ XEDECLARECLASS1(xe, Emulator);
 XEDECLARECLASS2(xe, cpu, Processor);
 XEDECLARECLASS2(xe, kernel, Dispatcher);
 XEDECLARECLASS2(xe, kernel, XModule);
+XEDECLARECLASS2(xe, kernel, XNotifyListener);
 XEDECLARECLASS2(xe, kernel, XThread);
 XEDECLARECLASS2(xe, kernel, XUserModule);
 XEDECLARECLASS3(xe, kernel, fs, FileSystem);
@@ -46,6 +51,9 @@ public:
 
   Dispatcher* dispatcher() const { return dispatcher_; }
 
+  XAppManager* app_manager() const { return app_manager_.get(); }
+  UserProfile* user_profile() const { return user_profile_.get(); }
+
   ObjectTable* object_table() const { return object_table_; }
 
   XModule* GetModule(const char* name);
@@ -56,6 +64,13 @@ public:
   void UnregisterThread(XThread* thread);
   XThread* GetThreadByID(uint32_t thread_id);
 
+  void RegisterNotifyListener(XNotifyListener* listener);
+  void UnregisterNotifyListener(XNotifyListener* listener);
+  void BroadcastNotification(XNotificationID id, uint32_t data);
+
+  void CompleteOverlapped(uint32_t overlapped_ptr, X_RESULT result, uint32_t length = 0);
+  void CompleteOverlappedImmediate(uint32_t overlapped_ptr, X_RESULT result, uint32_t length = 0);
+
 private:
   Emulator*       emulator_;
   Memory*         memory_;
@@ -64,9 +79,13 @@ private:
 
   Dispatcher*     dispatcher_;
 
+  std::unique_ptr<XAppManager> app_manager_;
+  std::unique_ptr<UserProfile> user_profile_;
+
   ObjectTable*    object_table_;
   xe_mutex_t*     object_mutex_;
   std::unordered_map<uint32_t, XThread*> threads_by_id_;
+  std::vector<XNotifyListener*> notify_listeners_;
 
   XUserModule*    executable_module_;
 

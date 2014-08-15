@@ -7,18 +7,16 @@
  ******************************************************************************
  */
 
-#ifndef XENIA_CPU_X64_X64_THUNK_EMITTER_H_
-#define XENIA_CPU_X64_X64_THUNK_EMITTER_H_
+#ifndef ALLOY_BACKEND_X64_X64_THUNK_EMITTER_H_
+#define ALLOY_BACKEND_X64_X64_THUNK_EMITTER_H_
 
 #include <alloy/core.h>
 #include <alloy/backend/x64/x64_backend.h>
 #include <alloy/backend/x64/x64_emitter.h>
 
-
 namespace alloy {
 namespace backend {
 namespace x64 {
-
 
 /**
  * Stack Layout
@@ -111,12 +109,12 @@ namespace x64 {
  *    ... locals ...
  *  +------------------+
  *  | (return address) |
- *  +------------------+ 
+ *  +------------------+
  *
  */
 
 class StackLayout {
-public:
+ public:
   const static size_t THUNK_STACK_SIZE = 120;
 
   const static size_t GUEST_STACK_SIZE = 88;
@@ -125,9 +123,8 @@ public:
   const static size_t GUEST_CALL_RET_ADDR = 80;
 };
 
-
 class X64ThunkEmitter : public X64Emitter {
-public:
+ public:
   X64ThunkEmitter(X64Backend* backend, XbyakAllocator* allocator);
   virtual ~X64ThunkEmitter();
 
@@ -138,10 +135,8 @@ public:
   GuestToHostThunk EmitGuestToHostThunk();
 };
 
-
 }  // namespace x64
 }  // namespace backend
 }  // namespace alloy
 
-
-#endif  // XENIA_CPU_X64_X64_THUNK_EMITTER_H_
+#endif  // ALLOY_BACKEND_X64_X64_THUNK_EMITTER_H_

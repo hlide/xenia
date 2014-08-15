@@ -9,12 +9,11 @@
 
 #include <xenia/cpu/xenon_memory.h>
 
-#include <alloy/runtime/tracing.h>
+#include <mutex>
 
 #include <gflags/gflags.h>
 
 using namespace alloy;
-using namespace alloy::runtime;
 using namespace xe::cpu;
 
 // TODO(benvanik): move xbox.h out
@@ -112,22 +111,25 @@ private:
   XenonMemory*  memory_;
   uint32_t      heap_id_;
   bool          is_physical_;
-  Mutex*        lock_;
+  std::mutex    lock_;
   size_t        size_;
   uint8_t*      ptr_;
   mspace        space_;
 };
 uint32_t XenonMemoryHeap::next_heap_id_ = 1;
 
-
-XenonMemory::XenonMemory() :
-    mapping_(0), mapping_base_(0),
-    Memory() {
+XenonMemory::XenonMemory()
+    : Memory(),
+      mapping_(0), mapping_base_(0), page_table_(0) {
   virtual_heap_ = new XenonMemoryHeap(this, false);
   physical_heap_ = new XenonMemoryHeap(this, true);
 }
 
 XenonMemory::~XenonMemory() {
+  // Uninstall the MMIO handler, as we won't be able to service more
+  // requests.
+  mmio_handler_.reset();
+
   if (mapping_base_) {
     // GPU writeback.
     VirtualFree(
@@ -144,9 +146,6 @@ XenonMemory::~XenonMemory() {
     CloseHandle(mapping_);
     mapping_base_ = 0;
     mapping_ = 0;
-
-    alloy::tracing::WriteEvent(EventType::MemoryDeinit({
-    }));
   }
 }
 
@@ -159,15 +158,22 @@ int XenonMemory::Initialize() {
 
   // Create main page file-backed mapping. This is all reserved but
   // uncommitted (so it shouldn't expand page file).
+#if XE_PLATFORM_WIN32
   mapping_ = CreateFileMapping(
       INVALID_HANDLE_VALUE,
       NULL,
       PAGE_READWRITE | SEC_RESERVE,
       1, 0, // entire 4gb space
       NULL);
+#else
+  char mapping_path[] = "/xenia/mapping/XXXXXX";
+  mktemp(mapping_path);
+  mapping_ = shm_open(mapping_path, O_CREAT, 0);
+  ftruncate(mapping_, 0x100000000);
+#endif  // XE_PLATFORM_WIN32
   if (!mapping_) {
     XELOGE("Unable to reserve the 4gb guest address space.");
-    XEASSERTNOTNULL(mapping_);
+    assert_not_null(mapping_);
     XEFAIL();
   }
 
@@ -183,19 +189,16 @@ int XenonMemory::Initialize() {
   }
   if (!mapping_base_) {
     XELOGE("Unable to find a continuous block in the 64bit address space.");
-    XEASSERTALWAYS();
+    assert_always();
     XEFAIL();
   }
   membase_ = mapping_base_;
-
-  alloy::tracing::WriteEvent(EventType::MemoryInit({
-  }));
 
   // Prepare heaps.
   virtual_heap_->Initialize(
       XENON_MEMORY_VIRTUAL_HEAP_LOW, XENON_MEMORY_VIRTUAL_HEAP_HIGH);
   physical_heap_->Initialize(
-      XENON_MEMORY_PHYSICAL_HEAP_LOW, XENON_MEMORY_PHYSICAL_HEAP_HIGH);
+      XENON_MEMORY_PHYSICAL_HEAP_LOW, XENON_MEMORY_PHYSICAL_HEAP_HIGH - 0x1000);
 
   // GPU writeback.
   // 0xC... is physical, 0x7F... is virtual. We may need to overlay these.
@@ -204,33 +207,55 @@ int XenonMemory::Initialize() {
       0x00100000,
       MEM_COMMIT, PAGE_READWRITE);
 
+  // Add handlers for MMIO.
+  mmio_handler_ = MMIOHandler::Install(mapping_base_);
+  if (!mmio_handler_) {
+    XELOGE("Unable to install MMIO handlers");
+    assert_always();
+    XEFAIL();
+  }
+
+  // Allocate dirty page table.
+  // This must live within our low heap. Ideally we'd hardcode the address but
+  // this is more flexible.
+  page_table_ = physical_heap_->Alloc(
+      0, (512 * 1024 * 1024) / (16 * 1024),
+      X_MEM_COMMIT, 16 * 1024);
+
   return 0;
 
 XECLEANUP:
   return result;
 }
 
+const static struct {
+  uint64_t  virtual_address_start;
+  uint64_t  virtual_address_end;
+  uint64_t  target_address;
+} map_info[] = {
+  0x00000000, 0x3FFFFFFF, 0x00000000, // (1024mb) - virtual 4k pages
+  0x40000000, 0x7FFFFFFF, 0x40000000, // (1024mb) - virtual 64k pages
+  0x80000000, 0x9FFFFFFF, 0x80000000, //  (512mb) - xex pages
+  0xA0000000, 0xBFFFFFFF, 0x00000000, //  (512mb) - physical 64k pages
+  0xC0000000, 0xDFFFFFFF, 0x00000000, //          - physical 16mb pages
+  0xE0000000, 0xFFFFFFFF, 0x00000000, //          - physical 4k pages
+};
 int XenonMemory::MapViews(uint8_t* mapping_base) {
-  static struct {
-    uint64_t  virtual_address_start;
-    uint64_t  virtual_address_end;
-    uint64_t  target_address;
-  } map_info[] = {
-    0x00000000, 0x3FFFFFFF, 0x00000000, // (1024mb) - virtual 4k pages
-    0x40000000, 0x7FFFFFFF, 0x40000000, // (1024mb) - virtual 64k pages
-    0x80000000, 0x9FFFFFFF, 0x80000000, //  (512mb) - xex pages
-    0xA0000000, 0xBFFFFFFF, 0x00000000, //  (512mb) - physical 64k pages
-    0xC0000000, 0xDFFFFFFF, 0x00000000, //          - physical 16mb pages
-    0xE0000000, 0xFFFFFFFF, 0x00000000, //          - physical 4k pages
-  };
-  XEASSERT(XECOUNT(map_info) == XECOUNT(views_.all_views));
+  assert_true(XECOUNT(map_info) == XECOUNT(views_.all_views));
   for (size_t n = 0; n < XECOUNT(map_info); n++) {
-    views_.all_views[n] = (uint8_t*)MapViewOfFileEx(
+#if XE_PLATFORM_WIN32
+    views_.all_views[n] = reinterpret_cast<uint8_t*>(MapViewOfFileEx(
         mapping_,
         FILE_MAP_ALL_ACCESS,
         0x00000000, (DWORD)map_info[n].target_address,
         map_info[n].virtual_address_end - map_info[n].virtual_address_start + 1,
-        mapping_base + map_info[n].virtual_address_start);
+        mapping_base + map_info[n].virtual_address_start));
+#else
+    views_.all_views[n] = reinterpret_cast<uint8_t*>(mmap(
+        map_info[n].virtual_address_start + mapping_base,
+        map_info[n].virtual_address_end - map_info[n].virtual_address_start + 1,
+        PROT_NONE, MAP_SHARED | MAP_FIXED, mapping_, map_info[n].target_address));
+#endif  // XE_PLATFORM_WIN32
     XEEXPECTNOTNULL(views_.all_views[n]);
   }
   return 0;
@@ -243,8 +268,83 @@ XECLEANUP:
 void XenonMemory::UnmapViews() {
   for (size_t n = 0; n < XECOUNT(views_.all_views); n++) {
     if (views_.all_views[n]) {
+#if XE_PLATFORM_WIN32
       UnmapViewOfFile(views_.all_views[n]);
+#else
+      size_t length = map_info[n].virtual_address_end - map_info[n].virtual_address_start + 1;
+      munmap(views_.all_views[n], length);
+#endif  // XE_PLATFORM_WIN32
     }
+  }
+}
+
+bool XenonMemory::AddMappedRange(uint64_t address, uint64_t mask,
+                                 uint64_t size, void* context,
+                                 MMIOReadCallback read_callback,
+                                 MMIOWriteCallback write_callback) {
+  DWORD protect = PAGE_NOACCESS;
+  if (!VirtualAlloc(Translate(address),
+                    size,
+                    MEM_COMMIT, protect)) {
+    XELOGE("Unable to map range; commit/protect failed");
+    return false;
+  }
+  return mmio_handler_->RegisterRange(address, mask, size, context, read_callback, write_callback);
+}
+
+uint8_t XenonMemory::LoadI8(uint64_t address) {
+  uint64_t value;
+  if (!mmio_handler_->CheckLoad(address, &value)) {
+    value = *reinterpret_cast<uint8_t*>(Translate(address));
+  }
+  return static_cast<uint8_t>(value);
+}
+
+uint16_t XenonMemory::LoadI16(uint64_t address) {
+  uint64_t value;
+  if (!mmio_handler_->CheckLoad(address, &value)) {
+    value = *reinterpret_cast<uint16_t*>(Translate(address));
+  }
+  return static_cast<uint16_t>(value);
+}
+
+uint32_t XenonMemory::LoadI32(uint64_t address) {
+  uint64_t value;
+  if (!mmio_handler_->CheckLoad(address, &value)) {
+    value = *reinterpret_cast<uint32_t*>(Translate(address));
+  }
+  return static_cast<uint32_t>(value);
+}
+
+uint64_t XenonMemory::LoadI64(uint64_t address) {
+  uint64_t value;
+  if (!mmio_handler_->CheckLoad(address, &value)) {
+    value = *reinterpret_cast<uint64_t*>(Translate(address));
+  }
+  return static_cast<uint64_t>(value);
+}
+
+void XenonMemory::StoreI8(uint64_t address, uint8_t value) {
+  if (!mmio_handler_->CheckStore(address, value)) {
+    *reinterpret_cast<uint8_t*>(Translate(address)) = value;
+  }
+}
+
+void XenonMemory::StoreI16(uint64_t address, uint16_t value) {
+  if (!mmio_handler_->CheckStore(address, value)) {
+    *reinterpret_cast<uint16_t*>(Translate(address)) = value;
+  }
+}
+
+void XenonMemory::StoreI32(uint64_t address, uint32_t value) {
+  if (!mmio_handler_->CheckStore(address, value)) {
+    *reinterpret_cast<uint32_t*>(Translate(address)) = value;
+  }
+}
+
+void XenonMemory::StoreI64(uint64_t address, uint64_t value) {
+  if (!mmio_handler_->CheckStore(address, value)) {
+    *reinterpret_cast<uint64_t*>(Translate(address)) = value;
   }
 }
 
@@ -273,13 +373,13 @@ uint64_t XenonMemory::HeapAlloc(
     if (base_address >= XENON_MEMORY_VIRTUAL_HEAP_LOW &&
         base_address < XENON_MEMORY_VIRTUAL_HEAP_HIGH) {
       // Overlapping managed heap.
-      XEASSERTALWAYS();
+      assert_always();
       return 0;
     }
     if (base_address >= XENON_MEMORY_PHYSICAL_HEAP_LOW &&
         base_address < XENON_MEMORY_PHYSICAL_HEAP_HIGH) {
       // Overlapping managed heap.
-      XEASSERTALWAYS();
+      assert_always();
       return 0;
     }
 
@@ -289,17 +389,13 @@ uint64_t XenonMemory::HeapAlloc(
     void* pv = VirtualAlloc(p, size, MEM_COMMIT, PAGE_READWRITE);
     if (!pv) {
       // Failed.
-      XEASSERTALWAYS();
+      assert_always();
       return 0;
     }
 
     if (flags & MEMORY_FLAG_ZERO) {
       xe_zero_struct(pv, size);
     }
-
-    alloy::tracing::WriteEvent(EventType::MemoryHeapAlloc({
-      0, flags, base_address, size,
-    }));
 
     return base_address;
   }
@@ -314,12 +410,15 @@ int XenonMemory::HeapFree(uint64_t address, size_t size) {
     return physical_heap_->Free(address, size) ? 0 : 1;
   } else {
     // A placed address. Decommit.
-    alloy::tracing::WriteEvent(EventType::MemoryHeapFree({
-      0, address,
-    }));
     uint8_t* p = Translate(address);
     return VirtualFree(p, size, MEM_DECOMMIT) ? 0 : 1;
   }
+}
+
+size_t XenonMemory::QueryInformation(uint64_t base_address, MEMORY_BASIC_INFORMATION mem_info) {
+  uint8_t* p = Translate(base_address);
+
+  return VirtualQuery(p, &mem_info, sizeof(mem_info));
 }
 
 size_t XenonMemory::QuerySize(uint64_t base_address) {
@@ -330,7 +429,7 @@ size_t XenonMemory::QuerySize(uint64_t base_address) {
              base_address < XENON_MEMORY_PHYSICAL_HEAP_HIGH) {
     return physical_heap_->QuerySize(base_address);
   } else {
-    // A placed address. Decommit.
+    // A placed address.
     uint8_t* p = Translate(base_address);
     MEMORY_BASIC_INFORMATION mem_info;
     if (VirtualQuery(p, &mem_info, sizeof(mem_info))) {
@@ -372,27 +471,17 @@ uint32_t XenonMemory::QueryProtect(uint64_t address) {
 XenonMemoryHeap::XenonMemoryHeap(XenonMemory* memory, bool is_physical) :
     memory_(memory), is_physical_(is_physical) {
   heap_id_ = next_heap_id_++;
-  lock_ = AllocMutex(10000);
 }
 
 XenonMemoryHeap::~XenonMemoryHeap() {
-  if (lock_ && space_) {
-    LockMutex(lock_);
+  if (space_) {
+    std::lock_guard<std::mutex> guard(lock_);
     destroy_mspace(space_);
     space_ = NULL;
-    UnlockMutex(lock_);
-  }
-  if (lock_) {
-    FreeMutex(lock_);
-    lock_ = NULL;
   }
 
   if (ptr_) {
     XEIGNORE(VirtualFree(ptr_, 0, MEM_RELEASE));
-
-    alloy::tracing::WriteEvent(EventType::MemoryHeapDeinit({
-      heap_id_,
-    }));
   }
 }
 
@@ -409,16 +498,12 @@ int XenonMemoryHeap::Initialize(uint64_t low, uint64_t high) {
   }
   space_ = create_mspace_with_base(ptr_, size_, 0);
 
-  alloy::tracing::WriteEvent(EventType::MemoryHeapInit({
-    heap_id_, low, high, is_physical_,
-  }));
-
   return 0;
 }
 
 uint64_t XenonMemoryHeap::Alloc(
     uint64_t base_address, size_t size, uint32_t flags, uint32_t alignment) {
-  XEIGNORE(LockMutex(lock_));
+  lock_.lock();
   size_t alloc_size = size;
   size_t heap_guard_size = FLAGS_heap_guard_pages * 4096;
   if (heap_guard_size) {
@@ -429,6 +514,7 @@ uint64_t XenonMemoryHeap::Alloc(
       space_,
       alignment,
       alloc_size + heap_guard_size * 2);
+  assert_true(reinterpret_cast<uint64_t>(p) <= 0xFFFFFFFFFull);
   if (FLAGS_heap_guard_pages) {
     size_t real_size = mspace_usable_size(p);
     DWORD old_protect;
@@ -443,7 +529,7 @@ uint64_t XenonMemoryHeap::Alloc(
   if (FLAGS_log_heap) {
     Dump();
   }
-  XEIGNORE(UnlockMutex(lock_));
+  lock_.unlock();
   if (!p) {
     return 0;
   }
@@ -480,10 +566,6 @@ uint64_t XenonMemoryHeap::Alloc(
   uint64_t address =
       (uint64_t)((uintptr_t)p - (uintptr_t)memory_->mapping_base_);
 
-  alloy::tracing::WriteEvent(EventType::MemoryHeapAlloc({
-    heap_id_, flags, address, size,
-  }));
-
   return address;
 }
 
@@ -504,7 +586,7 @@ uint64_t XenonMemoryHeap::Free(uint64_t address, size_t size) {
     memset(p + heap_guard_size, 0xDC, size);
   }
 
-  XEIGNORE(LockMutex(lock_));
+  lock_.lock();
   if (FLAGS_heap_guard_pages) {
     DWORD old_protect;
     VirtualProtect(
@@ -518,7 +600,7 @@ uint64_t XenonMemoryHeap::Free(uint64_t address, size_t size) {
   if (FLAGS_log_heap) {
     Dump();
   }
-  XEIGNORE(UnlockMutex(lock_));
+  lock_.unlock();
 
   if (is_physical_) {
     // If physical, decommit from physical ranges too.
@@ -535,10 +617,6 @@ uint64_t XenonMemoryHeap::Free(uint64_t address, size_t size) {
         size,
         MEM_DECOMMIT);
   }
-
-  alloy::tracing::WriteEvent(EventType::MemoryHeapFree({
-    heap_id_, address,
-  }));
 
   return (uint64_t)real_size;
 }

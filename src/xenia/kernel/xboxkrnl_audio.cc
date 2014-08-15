@@ -35,6 +35,8 @@ SHIM_CALL XMACreateContext_shim(
       context_ptr);
 
   // TODO(benvanik): allocate and return -- see if size required or just dummy?
+  // Games will call MmGetPhysicalAddress on the result.
+  SHIM_SET_MEM_32(context_ptr, 0xAAAABABE);
 
   SHIM_SET_RETURN_32(X_STATUS_SUCCESS);
 }
@@ -75,7 +77,9 @@ SHIM_CALL XAudioGetVoiceCategoryVolumeChangeMask_shim(
       "XAudioGetVoiceCategoryVolumeChangeMask(%.8X, %.8X)",
       driver_ptr, out_ptr);
 
-  XEASSERT(driver_ptr == 0xAADD1100);
+  assert_true((driver_ptr & 0xFFFF0000) == 0x41550000);
+
+  auto audio_system = state->emulator()->audio_system();
 
   // Checking these bits to see if any voice volume changed.
   // I think.
@@ -96,6 +100,18 @@ SHIM_CALL XAudioGetVoiceCategoryVolume_shim(
 
   // Expects a floating point single. Volume %?
   SHIM_SET_MEM_F32(out_ptr, 1.0f);
+
+  SHIM_SET_RETURN_32(X_ERROR_SUCCESS);
+}
+
+
+SHIM_CALL XAudioEnableDucker_shim(
+    PPCContext* ppc_state, KernelState* state) {
+  uint32_t unk = SHIM_GET_ARG_32(0);
+
+  XELOGD(
+      "XAudioEnableDucker(%.8X)",
+      unk);
 
   SHIM_SET_RETURN_32(X_ERROR_SUCCESS);
 }
@@ -122,8 +138,8 @@ SHIM_CALL XAudioRegisterRenderDriverClient_shim(
     return;
   }
 
-  XEASSERTTRUE(!(index & ~0x0000FFFF));
-  SHIM_SET_MEM_32(driver_ptr, 0x41550000 | (index & 0x0000FFFF));
+  assert_true(!(index & ~0x0000FFFF));
+  SHIM_SET_MEM_32(driver_ptr, 0x41550000 | (static_cast<uint32_t>(index) & 0x0000FFFF));
   SHIM_SET_RETURN_32(X_ERROR_SUCCESS);
 }
 
@@ -136,7 +152,7 @@ SHIM_CALL XAudioUnregisterRenderDriverClient_shim(
       "XAudioUnregisterRenderDriverClient(%.8X)",
       driver_ptr);
 
-  XEASSERT((driver_ptr & 0xFFFF0000) == 0x41550000);
+  assert_true((driver_ptr & 0xFFFF0000) == 0x41550000);
 
   auto audio_system = state->emulator()->audio_system();
   audio_system->UnregisterClient(driver_ptr & 0x0000FFFF);
@@ -153,7 +169,7 @@ SHIM_CALL XAudioSubmitRenderDriverFrame_shim(
       "XAudioSubmitRenderDriverFrame(%.8X, %.8X)",
       driver_ptr, samples_ptr);
 
-  XEASSERT((driver_ptr & 0xFFFF0000) == 0x41550000);
+  assert_true((driver_ptr & 0xFFFF0000) == 0x41550000);
 
   auto audio_system = state->emulator()->audio_system();
   audio_system->SubmitFrame(driver_ptr & 0x0000FFFF, samples_ptr);
@@ -191,9 +207,9 @@ void xe::kernel::xboxkrnl::RegisterAudioExports(
   // SHIM_SET_MAPPING("xboxkrnl.exe", XMAGetInputBufferReadOffset, state);
 
   SHIM_SET_MAPPING("xboxkrnl.exe", XAudioGetSpeakerConfig, state);
-
   SHIM_SET_MAPPING("xboxkrnl.exe", XAudioGetVoiceCategoryVolumeChangeMask, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", XAudioGetVoiceCategoryVolume, state);
+  SHIM_SET_MAPPING("xboxkrnl.exe", XAudioEnableDucker, state);
 
   SHIM_SET_MAPPING("xboxkrnl.exe", XAudioRegisterRenderDriverClient, state);
   SHIM_SET_MAPPING("xboxkrnl.exe", XAudioUnregisterRenderDriverClient, state);

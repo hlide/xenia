@@ -9,39 +9,33 @@
 
 #include <alloy/backend/ivm/ivm_assembler.h>
 
+#include <alloy/reset_scope.h>
 #include <alloy/backend/backend.h>
 #include <alloy/backend/ivm/ivm_intcode.h>
 #include <alloy/backend/ivm/ivm_function.h>
-#include <alloy/backend/ivm/tracing.h>
 #include <alloy/hir/hir_builder.h>
 #include <alloy/hir/label.h>
 #include <alloy/runtime/runtime.h>
 
-using namespace alloy;
-using namespace alloy::backend;
-using namespace alloy::backend::ivm;
-using namespace alloy::hir;
-using namespace alloy::runtime;
+namespace alloy {
+namespace backend {
+namespace ivm {
 
+using alloy::hir::HIRBuilder;
+using alloy::runtime::DebugInfo;
+using alloy::runtime::Function;
+using alloy::runtime::FunctionInfo;
 
-IVMAssembler::IVMAssembler(Backend* backend) :
-    source_map_arena_(128 * 1024),
-    Assembler(backend) {
-}
+IVMAssembler::IVMAssembler(Backend* backend)
+    : Assembler(backend), source_map_arena_(128 * 1024) {}
 
-IVMAssembler::~IVMAssembler() {
-  alloy::tracing::WriteEvent(EventType::AssemblerDeinit({
-  }));
-}
+IVMAssembler::~IVMAssembler() = default;
 
 int IVMAssembler::Initialize() {
   int result = Assembler::Initialize();
   if (result) {
     return result;
   }
-
-  alloy::tracing::WriteEvent(EventType::AssemblerInit({
-  }));
 
   return result;
 }
@@ -53,15 +47,19 @@ void IVMAssembler::Reset() {
   Assembler::Reset();
 }
 
-int IVMAssembler::Assemble(
-    FunctionInfo* symbol_info, HIRBuilder* builder,
-    uint32_t debug_info_flags, runtime::DebugInfo* debug_info,
-    Function** out_function) {
+int IVMAssembler::Assemble(FunctionInfo* symbol_info, HIRBuilder* builder,
+                           uint32_t debug_info_flags,
+                           std::unique_ptr<DebugInfo> debug_info,
+                           Function** out_function) {
+  SCOPE_profile_cpu_f("alloy");
+
+  // Reset when we leave.
+  make_reset_scope(this);
+
   IVMFunction* fn = new IVMFunction(symbol_info);
-  fn->set_debug_info(debug_info);
+  fn->set_debug_info(std::move(debug_info));
 
   TranslationContext ctx;
-  ctx.access_callbacks = backend_->runtime()->access_callbacks();
   ctx.register_count = 0;
   ctx.intcode_count = 0;
   ctx.intcode_arena = &intcode_arena_;
@@ -90,15 +88,15 @@ int IVMAssembler::Assemble(
 
   auto block = builder->first_block();
   while (block) {
-    Label* label = block->label_head;
+    auto label = block->label_head;
     while (label) {
       label->tag = (void*)(0x80000000 | ctx.intcode_count);
       label = label->next;
     }
 
-    Instr* i = block->instr_head;
+    auto i = block->instr_head;
     while (i) {
-      int result = TranslateIntCodes(ctx, i);
+      TranslateIntCodes(ctx, i);
       i = i->next;
     }
     block = block->next;
@@ -109,7 +107,8 @@ int IVMAssembler::Assemble(
   // Fixup label references.
   LabelRef* label_ref = ctx.label_ref_head;
   while (label_ref) {
-    label_ref->instr->src1_reg = (uint32_t)(intptr_t)label_ref->label->tag & ~0x80000000;
+    label_ref->instr->src1_reg =
+        (uint32_t)(intptr_t)label_ref->label->tag & ~0x80000000;
     label_ref = label_ref->next;
   }
 
@@ -118,3 +117,7 @@ int IVMAssembler::Assemble(
   *out_function = fn;
   return 0;
 }
+
+}  // namespace ivm
+}  // namespace backend
+}  // namespace alloy
